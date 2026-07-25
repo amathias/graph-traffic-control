@@ -1,4 +1,4 @@
-﻿# Coordinator Handoff: Graph Traffic Control
+# Coordinator Handoff: Graph Traffic Control
 
 ## Relationship to the portfolio coordinator
 
@@ -80,10 +80,12 @@ See `.env.example`. No secrets committed.
 
 ### Coordinator repository decision
 
-Every submission uses an independent local Git repository on branch `main`. The coordinator may
-promote clean local commits through the encrypted artifact bucket before GitHub exists. GitHub
-repository creation, remotes, and public pushes are deliberately deferred until the user is
-available.
+Every submission uses an independent local Git repository on branch `main`. This project's public
+repository is `https://github.com/amathias/graph-traffic-control`, and local `origin` uses the
+repository-scoped `github-datahub-graph-traffic-control` SSH alias. The primary project writer may
+push verified milestones under the no-force rules in `AGENTS.md`; remotes and deploy keys remain
+coordinator-owned. The encrypted artifact bucket remains the source of deployment artifacts and
+coordinator evidence rather than a substitute for the public source repository.
 
 ### Coordinator integration rulings
 

@@ -35,6 +35,19 @@ Before modifying code, read these files completely:
 - Test conflict matrices, indirect lineage collisions, expiration, drift, idempotency, aborts, and parallel safe work.
 - Maintain `docs/DECISIONS.md` as architectural decisions are made.
 
+## GitHub publishing
+
+- Canonical repository: `https://github.com/amathias/graph-traffic-control`.
+- Configured origin: `git@github-datahub-graph-traffic-control:amathias/graph-traffic-control.git`.
+- While this chat is the project's primary writer, it may commit and intermittently push verified
+  milestone changes to `origin/main`.
+- Inspect the complete diff, run relevant checks, stage only intended paths, and keep
+  `COORDINATOR_HANDOFF.md` current before pushing.
+- Never change the remote, force push, delete remote refs, use another project's SSH alias, or add
+  secrets, private keys, `.env` files, runtime receipts, or private evidence to Git.
+- If `origin` is absent or differs from the exact value above, stop and escalate to the portfolio
+  coordinator.
+
 ## Definition of done
 
 A reviewer can launch three demo agents, inspect their proposals, watch one unrelated change commit while two semantically conflicting changes are sequenced, observe a stale proposal get rebased or aborted, confirm verification, and inspect the resulting DataHub audit context.
