@@ -13,6 +13,20 @@ Re-read the graph, recompute the subgraph fingerprint, and **fail closed on any 
 execute the change, validate it, optionally perform the reversible DataHub writeback, and record
 the outcome. A validation failure rolls the artifact back and aborts.
 
+``COMMITTED`` means proved, not attempted
+-----------------------------------------
+Each step is observed independently and recorded on :class:`~graph_traffic_control.domain.models
+.CommitVerification`; nothing is inferred from "the previous call did not raise". A proposal
+reaches ``COMMITTED`` only when
+
+- the artifact mutation is confirmed by **re-reading the file from disk**, and
+- the validator passed, and
+- if a writeback was attempted, DataHub **returned the written value on re-read**.
+
+Any of these failing rolls the artifact back and aborts. Writeback verification and writeback
+restoration are separate facts: a verified write whose restoration failed still proves the write
+landed, and the receipt records the unrestored value rather than hiding both behind one flag.
+
 Determinism
 -----------
 Every decision here is a pure function of the proposals, the snapshot, and the injected clock.
@@ -36,6 +50,7 @@ from graph_traffic_control.context.provider import ContextProvider, ContextReadE
 from graph_traffic_control.domain.clock import Clock
 from graph_traffic_control.domain.models import (
     ChangeProposal,
+    CommitVerification,
     Conflict,
     Criticality,
     GraphSnapshot,
@@ -50,6 +65,7 @@ from graph_traffic_control.execute.targets import ArtifactExecutor, ExecutionErr
 from graph_traffic_control.execute.validator import Validator
 from graph_traffic_control.txn.leases import LeaseConflict, LeaseManager
 from graph_traffic_control.txn.store import TransactionStore
+from graph_traffic_control.writeback.datahub import WritebackError
 
 COORDINATOR_ACTOR = "coordinator"
 PREPARE_TOKEN_TTL_SECONDS = 300
@@ -93,6 +109,7 @@ class CommitOutcome:
     artifact_diff: str | None = None
     validation: dict[str, str] | None = None
     writeback: WritebackReceipt | None = None
+    verification: CommitVerification = field(default_factory=CommitVerification)
     prepare_fingerprint: str = ""
     commit_fingerprint: str = ""
 
@@ -445,43 +462,100 @@ class Coordinator:
             outcome.commit_fingerprint = commit_fingerprint
             return outcome
 
+        # Every step below is observed independently and recorded on `verification`. Nothing is
+        # inferred from "the previous call did not raise".
+        verification = CommitVerification()
+
+        def fail(reason: str, evidence: dict[str, str] | None = None) -> CommitOutcome:
+            outcome = self._abort(proposal, reason, evidence=evidence)
+            outcome.prepare_fingerprint = stored.subgraph_fingerprint
+            outcome.commit_fingerprint = commit_fingerprint
+            outcome.verification = verification
+            outcome.writeback = writeback_receipt
+            return outcome
+
+        writeback_receipt: WritebackReceipt | None = None
+
         self._transition(proposal, TransactionState.EXECUTING, detail="executing")
         try:
             execution = self._executor.apply(proposal.action)
         except ExecutionError as exc:
-            outcome = self._abort(proposal, f"Execution failed: {exc}")
-            outcome.prepare_fingerprint = stored.subgraph_fingerprint
-            outcome.commit_fingerprint = commit_fingerprint
-            return outcome
+            verification.detail = f"Execution failed: {exc}"
+            return fail(f"Execution failed: {exc}")
+        verification.mutation_applied = True
+
+        # The artifact is re-read from disk. `apply` returning cleanly says the write call did
+        # not error; it does not say the intended bytes are on disk.
+        verification.mutation_reread_verified = self._executor.verify(execution)
+        if not verification.mutation_reread_verified:
+            verification.artifact_rolled_back = self._executor.rollback(execution)
+            verification.detail = "Artifact re-read did not match the intended content."
+            return fail(
+                "Artifact mutation could not be verified by re-reading it from disk.",
+                evidence={"mutation_reread_verified": "false"},
+            )
 
         self._transition(proposal, TransactionState.VALIDATING, detail="validating")
         validation = self._validator.validate(proposal, fresh, self._downstream_artifacts)
+        verification.validation_passed = validation.passed
         if not validation.passed:
-            self._executor.rollback(execution)
-            outcome = self._abort(
-                proposal,
+            verification.artifact_rolled_back = self._executor.rollback(execution)
+            verification.detail = f"Validation failed: {'; '.join(validation.failures)}"
+            outcome = fail(
                 f"Validation failed: {'; '.join(validation.failures)}",
                 evidence=validation.as_evidence(),
             )
             outcome.artifact_diff = "rolled back"
             outcome.validation = validation.as_evidence()
-            outcome.prepare_fingerprint = stored.subgraph_fingerprint
-            outcome.commit_fingerprint = commit_fingerprint
             return outcome
 
-        writeback_receipt: WritebackReceipt | None = None
         if writeback is not None:
+            verification.writeback_attempted = True
             note = (
                 f"Graph Traffic Control committed {proposal.proposal_id} "
                 f"by {proposal.agent.agent_id}: {proposal.intent}"
             )
-            writeback_receipt = writeback.apply(proposal.action.target_urn, note)
+            try:
+                writeback_receipt = writeback.apply(proposal.action.target_urn, note)
+            except (WritebackError, NamespaceViolation) as exc:
+                verification.artifact_rolled_back = self._executor.rollback(execution)
+                verification.detail = f"Writeback could not be attempted: {exc}"
+                return fail(f"DataHub writeback failed: {exc}")
+
+            # Verification and restoration are separate facts. Only the first gates the commit:
+            # a verified write whose restoration failed still proves the write landed, and the
+            # receipt records the unrestored value loudly rather than hiding it behind one flag.
+            verification.writeback_verified = writeback_receipt.verified
+            verification.writeback_restored = writeback_receipt.restored
+            if not writeback_receipt.verified:
+                verification.artifact_rolled_back = self._executor.rollback(execution)
+                verification.detail = (
+                    "DataHub re-read did not return the written value: "
+                    f"{writeback_receipt.detail}"
+                )
+                return fail(
+                    "DataHub writeback could not be verified by re-reading the entity.",
+                    evidence={
+                        "writeback_verified": "false",
+                        "writeback_restored": str(writeback_receipt.restored).lower(),
+                    },
+                )
+
+        # The gate. Restated here rather than assumed from the flow above, so that adding a step
+        # without adding it to `commit_permitted` cannot quietly widen what "committed" means.
+        if not verification.commit_permitted():
+            verification.artifact_rolled_back = self._executor.rollback(execution)
+            return fail(
+                "Commit refused: not every required step was positively verified.",
+                evidence={"verification": verification.model_dump_json()},
+            )
 
         evidence = {
             "artifact": str(execution.artifact_path.name),
             "diff": execution.diff_summary,
             "context_source": self._provider.source,
             "fingerprint_at_commit": commit_fingerprint,
+            "mutation_reread_verified": "true",
             **validation.as_evidence(),
         }
         if writeback_receipt is not None:
@@ -499,6 +573,7 @@ class Coordinator:
             artifact_diff=execution.diff_summary,
             validation=validation.as_evidence(),
             writeback=writeback_receipt,
+            verification=verification,
             prepare_fingerprint=stored.subgraph_fingerprint,
             commit_fingerprint=commit_fingerprint,
         )

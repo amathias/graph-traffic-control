@@ -226,7 +226,7 @@ def commit_proposal(proposal_id: str, token: str, runtime: RuntimeDep) -> dict[s
     except CoordinatorError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
 
-    runtime.receipts.commit_receipt(
+    receipt_path = runtime.receipts.commit_receipt(
         proposal=proposal,
         final_state=outcome.state,
         events=runtime.store.list_events(proposal_id),
@@ -236,8 +236,12 @@ def commit_proposal(proposal_id: str, token: str, runtime: RuntimeDep) -> dict[s
         artifact_diff=outcome.artifact_diff,
         validation=outcome.validation,
         writeback=outcome.writeback,
+        verification=outcome.verification,
         abort_reason=outcome.reason or None,
     )
+    # Receipt writing is tracked separately from the commit itself: a commit is not evidenced
+    # merely because it happened.
+    outcome.verification.receipts.append(receipt_path.name)
 
     return {
         "proposal_id": outcome.proposal_id,
@@ -246,6 +250,7 @@ def commit_proposal(proposal_id: str, token: str, runtime: RuntimeDep) -> dict[s
         "drift_detected": outcome.drift_detected,
         "artifact_diff": outcome.artifact_diff,
         "validation": outcome.validation,
+        "verification": outcome.verification.model_dump(mode="json"),
         "writeback": (
             outcome.writeback.model_dump(mode="json") if outcome.writeback else None
         ),

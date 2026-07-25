@@ -353,6 +353,50 @@ class TransactionEvent(Strict):
     evidence: dict[str, str] = Field(default_factory=dict)
 
 
+class CommitVerification(Strict):
+    """What a commit actually proved, one independently tracked signal per step.
+
+    ``AGENTS.md`` requires that committed changes are *verified* and the result recorded. A
+    single boolean cannot carry that: "the executor returned without raising" is not "the file on
+    disk now holds the new content", and "the writeback call succeeded" is not "DataHub returned
+    the written value". Each step below is therefore observed separately and recorded separately,
+    so a receipt says which ones actually happened.
+
+    :meth:`commit_permitted` is the gate. A proposal may not reach ``COMMITTED`` unless the
+    artifact mutation is confirmed by a re-read and, when a writeback was attempted, that
+    writeback was confirmed by a re-read too.
+    """
+
+    #: The executor reported that it applied the change.
+    mutation_applied: bool = False
+    #: The artifact was re-read from disk and holds exactly the expected content.
+    mutation_reread_verified: bool = False
+    #: The validator passed against the re-read artifact and the fresh graph.
+    validation_passed: bool = False
+    #: A DataHub writeback was attempted at all (false in fixture mode).
+    writeback_attempted: bool = False
+    #: The writeback was re-read from DataHub and returned the written value.
+    writeback_verified: bool = False
+    #: The writeback's original value was restored and confirmed. Independent of ``verified``.
+    writeback_restored: bool = False
+    #: The artifact was restored to its pre-execution content after a failure.
+    artifact_rolled_back: bool = False
+    #: Receipt filenames written for this commit. Tracked separately: a commit is not evidenced
+    #: merely because it happened.
+    receipts: list[str] = Field(default_factory=list)
+    #: Human-readable note for whichever step failed.
+    detail: str = ""
+
+    def commit_permitted(self) -> bool:
+        if not (self.mutation_applied and self.mutation_reread_verified):
+            return False
+        if not self.validation_passed:
+            return False
+        if self.writeback_attempted and not self.writeback_verified:
+            return False
+        return True
+
+
 class WritebackReceipt(Strict):
     """Evidence of one reversible DataHub writeback, including its restoration.
 

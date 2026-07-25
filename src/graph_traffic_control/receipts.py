@@ -25,6 +25,7 @@ from typing import Any
 
 from graph_traffic_control.domain.models import (
     ChangeProposal,
+    CommitVerification,
     Conflict,
     ImpactSet,
     Lease,
@@ -172,6 +173,7 @@ class ReceiptWriter:
         artifact_diff: str | None = None,
         validation: dict[str, str] | None = None,
         writeback: WritebackReceipt | None = None,
+        verification: CommitVerification | None = None,
         abort_reason: str | None = None,
     ) -> Path:
         return self._write(
@@ -187,6 +189,9 @@ class ReceiptWriter:
                 "drift_detected": prepare_fingerprint != commit_fingerprint,
                 "artifact_diff": artifact_diff,
                 "validation": validation,
+                # Each verification step is recorded separately, so a reader can tell which of
+                # them actually happened rather than trusting the final state alone.
+                "verification": _jsonable(verification) if verification else None,
                 "writeback": _jsonable(writeback) if writeback else None,
                 "abort_reason": abort_reason,
                 "events": [_jsonable(event) for event in events],

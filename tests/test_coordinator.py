@@ -7,6 +7,8 @@ idempotency, and namespace refusal.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from graph_traffic_control.context.namespace import NamespaceViolation
@@ -24,9 +26,12 @@ from graph_traffic_control.domain.models import (
     AgentIdentity,
     ChangeAction,
     ChangeProposal,
+    CommitVerification,
     TransactionState,
+    WritebackReceipt,
 )
 from graph_traffic_control.txn.coordinator import Coordinator, CoordinatorError
+from graph_traffic_control.writeback.datahub import WritebackError
 
 
 class _BrokenProvider:
@@ -409,3 +414,152 @@ class TestFailsClosedOnUnreadableContext:
         coordinator.prepare(c)
         states = {state for _, state in store.list_proposals()}
         assert TransactionState.COMMITTED not in states
+
+
+class _WritebackDouble:
+    """A writeback stand-in with independently steerable verification and restoration."""
+
+    def __init__(self, verified=True, restored=True, raises=None):
+        self.verified = verified
+        self.restored = restored
+        self.raises = raises
+        self.calls: list[tuple[str, str]] = []
+
+    def apply(self, urn: str, note: str) -> WritebackReceipt:
+        self.calls.append((urn, note))
+        if self.raises is not None:
+            raise self.raises
+        return WritebackReceipt(
+            entity_urn=urn,
+            aspect="description",
+            operation="SET",
+            previous_value="before",
+            written_value=note,
+            reread_value=note if self.verified else "something else",
+            verified=self.verified,
+            restoration_attempted=True,
+            restored=self.restored,
+            restored_value="before" if self.restored else "still the note",
+            written_at=datetime(2026, 1, 1, tzinfo=UTC),
+            detail="",
+        )
+
+
+class TestCommitRequiresPositiveVerification:
+    """COMMITTED means proved, not attempted.
+
+    Each step is tracked separately so a receipt can say which ones actually happened.
+    """
+
+    def test_a_clean_commit_records_every_step_it_proved(self, coordinator, versions):
+        c = proposal_c(versions)
+        outcome = coordinator.prepare(c)
+        result = _approve_and_commit(coordinator, c, outcome)
+
+        v = result.verification
+        assert result.committed
+        assert v.mutation_applied and v.mutation_reread_verified
+        assert v.validation_passed
+        assert v.artifact_rolled_back is False
+        assert v.writeback_attempted is False, "fixture mode attempts no writeback"
+        assert v.commit_permitted()
+
+    def test_unverifiable_artifact_mutation_aborts_and_rolls_back(
+        self, coordinator, versions, executor, monkeypatch
+    ):
+        """The write call not raising is not proof the intended bytes are on disk."""
+        c = proposal_c(versions)
+        outcome = coordinator.prepare(c)
+        monkeypatch.setattr(executor, "verify", lambda _result: False)
+
+        result = _approve_and_commit(coordinator, c, outcome)
+
+        assert result.state is TransactionState.ABORTED
+        assert "could not be verified" in result.reason
+        assert result.verification.mutation_applied is True
+        assert result.verification.mutation_reread_verified is False
+        assert result.verification.artifact_rolled_back is True
+        assert not result.verification.commit_permitted()
+
+    def test_an_unverified_writeback_aborts_the_commit(self, coordinator, versions, executor):
+        c = proposal_c(versions)
+        outcome = coordinator.prepare(c)
+        before = executor.read(c.action.artifact_path)
+
+        result = _approve_and_commit(
+            coordinator, c, outcome, writeback=_WritebackDouble(verified=False)
+        )
+
+        assert result.state is TransactionState.ABORTED
+        assert result.verification.writeback_attempted is True
+        assert result.verification.writeback_verified is False
+        assert result.verification.artifact_rolled_back is True
+        assert executor.read(c.action.artifact_path) == before, "artifact must be rolled back"
+
+    def test_a_writeback_that_cannot_be_attempted_aborts(self, coordinator, versions):
+        c = proposal_c(versions)
+        outcome = coordinator.prepare(c)
+        result = _approve_and_commit(
+            coordinator,
+            c,
+            outcome,
+            writeback=_WritebackDouble(raises=WritebackError("capture failed")),
+        )
+        assert result.state is TransactionState.ABORTED
+        assert "writeback failed" in result.reason.lower()
+        assert result.verification.artifact_rolled_back is True
+
+    def test_a_verified_writeback_commits_and_records_both_flags(self, coordinator, versions):
+        c = proposal_c(versions)
+        outcome = coordinator.prepare(c)
+        result = _approve_and_commit(
+            coordinator, c, outcome, writeback=_WritebackDouble(verified=True, restored=True)
+        )
+        assert result.committed
+        assert result.verification.writeback_verified is True
+        assert result.verification.writeback_restored is True
+
+    def test_a_failed_restoration_is_recorded_without_faking_the_write(
+        self, coordinator, versions, store
+    ):
+        """Verified-write and restored-original are independent facts.
+
+        A restoration failure leaves the shared instance dirty, which the receipt must state; it
+        does not retract the fact that the write landed and was re-read.
+        """
+        c = proposal_c(versions)
+        outcome = coordinator.prepare(c)
+        result = _approve_and_commit(
+            coordinator, c, outcome, writeback=_WritebackDouble(verified=True, restored=False)
+        )
+
+        assert result.committed, "a verified write is still a verified write"
+        assert result.verification.writeback_verified is True
+        assert result.verification.writeback_restored is False
+
+        committed = [
+            e for e in store.list_events(c.proposal_id) if e.to_state is TransactionState.COMMITTED
+        ][0]
+        assert committed.evidence["writeback_verified"] == "true"
+        assert committed.evidence["writeback_restored"] == "false"
+
+    def test_the_gate_itself_refuses_an_unproved_commit(self, coordinator, versions, monkeypatch):
+        """Belt and braces: even if the flow above changed, the gate must still refuse."""
+        c = proposal_c(versions)
+        outcome = coordinator.prepare(c)
+        monkeypatch.setattr(CommitVerification, "commit_permitted", lambda _self: False)
+
+        result = _approve_and_commit(coordinator, c, outcome)
+
+        assert result.state is TransactionState.ABORTED
+        assert "not every required step was positively verified" in result.reason
+
+    def test_receipts_are_tracked_independently_of_the_commit(self, coordinator, versions):
+        """A commit is not evidenced merely because it happened."""
+        c = proposal_c(versions)
+        outcome = coordinator.prepare(c)
+        result = _approve_and_commit(coordinator, c, outcome)
+        assert result.committed
+        assert result.verification.receipts == [], (
+            "the coordinator must not claim a receipt it did not write; the caller records it"
+        )

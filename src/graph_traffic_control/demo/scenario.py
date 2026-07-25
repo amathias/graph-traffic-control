@@ -91,7 +91,7 @@ class ScenarioRunner:
             self.coordinator.approve(outcome.token, APPROVER)
         token = self.coordinator.token(outcome.token.token)
         result = self.coordinator.commit(proposal, token)
-        self.receipts.commit_receipt(
+        receipt_path = self.receipts.commit_receipt(
             proposal=proposal,
             final_state=result.state,
             events=self.store.list_events(proposal.proposal_id),
@@ -101,8 +101,10 @@ class ScenarioRunner:
             artifact_diff=result.artifact_diff,
             validation=result.validation,
             writeback=result.writeback,
+            verification=result.verification,
             abort_reason=result.reason or None,
         )
+        result.verification.receipts.append(receipt_path.name)
         return result
 
     def run(self, echo=print) -> dict[str, Any]:  # noqa: T202 - CLI output is the point

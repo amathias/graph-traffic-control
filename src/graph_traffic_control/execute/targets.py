@@ -92,6 +92,26 @@ class ArtifactExecutor:
             artifact_path=path, before=before, after=after, changed=before != after
         )
 
-    def rollback(self, result: ExecutionResult) -> None:
-        """Restore the artifact to its pre-execution content."""
-        result.artifact_path.write_text(result.before, encoding="utf-8")
+    def verify(self, result: ExecutionResult) -> bool:
+        """Re-read the artifact from disk and confirm it holds exactly the intended content.
+
+        Separate from :meth:`apply` on purpose. ``apply`` returning without raising only says the
+        write call did not error; it does not say the bytes on disk are the intended ones. The
+        commit gate requires the stronger statement, so it is obtained by actually reading back.
+        """
+        try:
+            return result.artifact_path.read_text(encoding="utf-8") == result.after
+        except OSError:
+            return False
+
+    def rollback(self, result: ExecutionResult) -> bool:
+        """Restore the artifact to its pre-execution content, and confirm the restoration.
+
+        Returns whether a re-read shows the original content back in place, so a failed rollback
+        is recorded as failed rather than assumed to have worked.
+        """
+        try:
+            result.artifact_path.write_text(result.before, encoding="utf-8")
+            return result.artifact_path.read_text(encoding="utf-8") == result.before
+        except OSError:
+            return False
