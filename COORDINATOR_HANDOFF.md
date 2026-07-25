@@ -59,10 +59,10 @@ live EC2 host from this project chat.
 | Field | Value |
 |---|---|
 | Branch | `main` |
-| Product candidate | _recorded in the follow-up docs commit_ |
-| Documentation handoff HEAD | _this commit_ |
-| Tree state | Clean; `git status` empty |
+| Product candidate | `61998c0a69d783481b9da3fdcc1d7b280e030e9a` |
+| Tree state | Clean at that commit; `git status` empty |
 | Pushed to origin | `origin/main` |
+| Verified at that commit | 246 tests pass, `ruff check` clean, four-agent scenario runs end to end, endpoints exercised on a running server |
 
 Promote this commit only for a **fixture-mode** deployment, or after the live checks below are
 run on the host. In a non-local `APP_ENV` without `DATAHUB_MCP_URL` and `DATAHUB_TOKEN`, readiness
