@@ -35,6 +35,10 @@ gtc-api = "graph_traffic_control.api:run"
 gtc-seed = "graph_traffic_control.demo.seed:main"
 gtc-reset = "graph_traffic_control.demo.reset:main"
 gtc-demo = "graph_traffic_control.demo.scenario:main"
+gtc-datahub-seed = "graph_traffic_control.demo.datahub_cli:seed_main"
+gtc-datahub-reset = "graph_traffic_control.demo.datahub_cli:reset_main"
+gtc-datahub-capture = "graph_traffic_control.demo.datahub_cli:capture_main"
+gtc-datahub-restore = "graph_traffic_control.demo.datahub_cli:restore_main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/graph_traffic_control"]

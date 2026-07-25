@@ -5,8 +5,10 @@ another project's entities. This reset is therefore bounded twice:
 
 1. Filesystem deletions are confined to ``APP_STATE_DIR`` by an explicit containment check that
    resolves symlinks first.
-2. DataHub deletions (added in Phase 5) are confined to the ``traffic.`` allocation by the same
-   fail-closed guard the seed uses.
+2. DataHub deletions live in :mod:`graph_traffic_control.demo.datahub_state` and are confined to
+   the ``traffic.`` allocation by the same fail-closed guard the seed uses. They are a separate
+   command (``gtc-datahub-reset``) on purpose: this one is a local, offline, always-safe
+   operation, and bundling a shared-instance mutation into it would make that untrue.
 
 The reset never removes the fixture root. Fixtures are version-controlled inputs, not state.
 """
