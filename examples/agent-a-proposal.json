@@ -1,0 +1,50 @@
+{
+  "action": {
+    "artifact_path": "fct_revenue.sql",
+    "field_path": "gross_revenue",
+    "kind": "rename_column",
+    "new_field_path": "recognized_revenue",
+    "target_urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD)"
+  },
+  "agent": {
+    "agent_id": "agent-a",
+    "capabilities": [
+      "rename_column"
+    ],
+    "display_name": "Revenue Schema Agent"
+  },
+  "evidence": [
+    "ASC 606 alignment ticket FIN-4821"
+  ],
+  "expected_versions": {},
+  "intent": "Rename gross_revenue to recognized_revenue for ASC 606 alignment",
+  "proposal_id": "prop-a-rename-revenue",
+  "read_fields": [],
+  "read_set": [
+    "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.stg_sales,PROD)"
+  ],
+  "requested_lease_seconds": 120,
+  "risk": {
+    "blast_radius_hint": 2,
+    "level": "HIGH",
+    "requires_approval": true
+  },
+  "validation_plan": {
+    "expect_artifact_absent": [
+      "gross_revenue"
+    ],
+    "expect_artifact_contains": [
+      "recognized_revenue"
+    ],
+    "expect_downstream_resolvable": true
+  },
+  "write_fields": [
+    {
+      "field_path": "gross_revenue",
+      "urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD)"
+    }
+  ],
+  "write_set": [
+    "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD)"
+  ]
+}

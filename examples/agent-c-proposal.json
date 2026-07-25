@@ -1,0 +1,43 @@
+{
+  "action": {
+    "artifact_path": "fct_support_sla.sql",
+    "field_path": null,
+    "kind": "update_model",
+    "new_field_path": null,
+    "target_urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_support_sla,PROD)"
+  },
+  "agent": {
+    "agent_id": "agent-c",
+    "capabilities": [
+      "update_model"
+    ],
+    "display_name": "Support Pipeline Agent"
+  },
+  "evidence": [
+    "Support ops request SUP-91"
+  ],
+  "expected_versions": {},
+  "intent": "Recalculate support SLA attainment with the four-hour target",
+  "proposal_id": "prop-c-support-sla",
+  "read_fields": [],
+  "read_set": [
+    "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.stg_support,PROD)"
+  ],
+  "requested_lease_seconds": 120,
+  "risk": {
+    "blast_radius_hint": 0,
+    "level": "LOW",
+    "requires_approval": false
+  },
+  "validation_plan": {
+    "expect_artifact_absent": [],
+    "expect_artifact_contains": [
+      "sla_attainment"
+    ],
+    "expect_downstream_resolvable": false
+  },
+  "write_fields": [],
+  "write_set": [
+    "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_support_sla,PROD)"
+  ]
+}

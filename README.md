@@ -52,8 +52,9 @@ python -m venv .venv
 .venv/Scripts/python.exe -m pip install -e ".[dev]"    # Windows
 # source .venv/bin/activate && pip install -e ".[dev]"  # macOS / Linux
 
-pytest                 # 57 tests
-gtc-seed               # materialise deterministic demo state
+pytest                 # full suite, no network required
+gtc-seed               # materialise deterministic demo state and SQL artifacts
+gtc-demo               # run the four-agent coordination scenario end to end
 gtc-api                # serve on http://127.0.0.1:8105
 ```
 
@@ -62,6 +63,7 @@ Then:
 ```bash
 curl http://127.0.0.1:8105/api/health
 curl http://127.0.0.1:8105/api/readiness
+curl http://127.0.0.1:8105/api/graph
 ```
 
 `gtc-reset` clears demo state. It is scoped to this project's state directory and cannot delete
@@ -70,18 +72,47 @@ version-controlled fixtures or another project's DataHub entities.
 Copy `.env.example` to `.env` to override defaults. DataHub connection variables are blank by
 default; the application runs fixture-backed until they are supplied.
 
+## What it does
+
+Agents submit structured proposals declaring intent, read set, write set, expected entity
+versions, an executable action, a validation plan, and evidence. The coordinator then:
+
+1. guards every URN against this project's `traffic.` allocation, failing closed;
+2. reads the graph and rejects proposals whose expected versions are stale;
+3. expands each proposal's impact through lineage within a bounded depth;
+4. applies a deterministic conflict matrix, including **lineage-mediated conflicts between
+   proposals that share no declared URN at all**;
+5. grants expiring leases so unrelated work runs in parallel and abandoned work cannot block;
+6. issues a prepared token fingerprinting the subgraph the proposal depends on;
+7. **re-reads the graph immediately before commit and aborts on any drift**;
+8. executes the change against a real local SQL artifact, validates it, and rolls back on failure;
+9. performs one reversible DataHub writeback — capture, write, immediate re-read, restore;
+10. writes sanitized proposal, lease, and commit receipts.
+
+No language model participates in any conflict or commit decision.
+
+### Why this is not file locking
+
+Agent A renames a column on `traffic.fct_revenue`. Agent B publishes a metric in
+`traffic.metric_net_revenue`. **Different files, different write targets, no overlap** — every
+file-, branch-, or worktree-based coordinator says these are safe. They are not: the lineage path
+`fct_revenue -> metric_net_revenue` means A's change reaches B's asset. The coordinator reports
+that path as the conflict evidence. Meanwhile Agent C's support-branch change is lineage-disjoint
+and commits in parallel rather than being serialised behind either of them.
+
 ## Current status
 
-Phase 0 of eight is complete: project scaffold, the shared health/readiness contract, the
-fail-closed DataHub namespace guard, and a deterministic seed and reset.
+The proposal → lease → commit vertical slice is implemented and tested: conflict matrix,
+two-phase commit with pre-commit graph recheck, expiring leases, real artifact mutation with
+rollback, reversible writeback, sanitized receipts, and strong non-mutating readiness.
 
-The conflict engine, two-phase commit, demo agents, live DataHub integration, and UI are not built
-yet. See [the implementation plan](./IMPLEMENTATION_PLAN.md) for sequencing, and
-[decisions](./docs/DECISIONS.md) for why the context provider is fixture-backed until the shared
-DataHub instance is reachable.
+**No connection to the shared DataHub instance has been made.** The MCP client, DataHub context
+provider, and writeback are exercised against a localhost protocol test double over real HTTP —
+not against DataHub Core v1.6.0. There are no live receipts, and this README claims none. See
+[LIMITATIONS.md](./docs/LIMITATIONS.md) for the precise line between what has been executed and
+what has not.
 
-Nothing in this repository yet claims a DataHub read or writeback. Those arrive in Phase 5 and
-will be evidenced with receipts.
+Still to build: the coordinator UI, the recorded demo, and the live DataHub run.
 
 ## Workspace map
 

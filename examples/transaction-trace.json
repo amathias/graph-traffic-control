@@ -1,0 +1,335 @@
+{
+  "events": [
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-a",
+      "at": "2026-07-25T21:01:14.767372Z",
+      "detail": "submitted",
+      "evidence": {},
+      "from_state": null,
+      "proposal_id": "prop-a-rename-revenue",
+      "sequence": 1,
+      "to_state": "SUBMITTED"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-a",
+      "at": "2026-07-25T21:01:14.936451Z",
+      "detail": "analyzing",
+      "evidence": {},
+      "from_state": "SUBMITTED",
+      "proposal_id": "prop-a-rename-revenue",
+      "sequence": 2,
+      "to_state": "ANALYZING"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-a",
+      "at": "2026-07-25T21:01:15.165363Z",
+      "detail": "prepared",
+      "evidence": {
+        "approval_required": "true",
+        "blast_radius": "2",
+        "context_source": "fixture",
+        "lease_id": "lease-e850db8cee32",
+        "subgraph_fingerprint": "a4509bdbd64fd30b"
+      },
+      "from_state": "ANALYZING",
+      "proposal_id": "prop-a-rename-revenue",
+      "sequence": 3,
+      "to_state": "PREPARED"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-b",
+      "at": "2026-07-25T21:01:15.253984Z",
+      "detail": "submitted",
+      "evidence": {},
+      "from_state": null,
+      "proposal_id": "prop-b-net-revenue-metric",
+      "sequence": 4,
+      "to_state": "SUBMITTED"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-b",
+      "at": "2026-07-25T21:01:15.388934Z",
+      "detail": "analyzing",
+      "evidence": {},
+      "from_state": "SUBMITTED",
+      "proposal_id": "prop-b-net-revenue-metric",
+      "sequence": 5,
+      "to_state": "ANALYZING"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-b",
+      "at": "2026-07-25T21:01:15.471244Z",
+      "detail": "prop-a-rename-revenue writes urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD), which prop-b-net-revenue-metric reads. The two must be ordered.",
+      "evidence": {
+        "conflict_decision": "ORDER",
+        "conflict_kind": "WRITE_READ",
+        "lineage_path": "",
+        "other_proposal": "prop-b-net-revenue-metric"
+      },
+      "from_state": "ANALYZING",
+      "proposal_id": "prop-b-net-revenue-metric",
+      "sequence": 6,
+      "to_state": "BLOCKED"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-c",
+      "at": "2026-07-25T21:01:15.561093Z",
+      "detail": "submitted",
+      "evidence": {},
+      "from_state": null,
+      "proposal_id": "prop-c-support-sla",
+      "sequence": 7,
+      "to_state": "SUBMITTED"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-c",
+      "at": "2026-07-25T21:01:15.628829Z",
+      "detail": "analyzing",
+      "evidence": {},
+      "from_state": "SUBMITTED",
+      "proposal_id": "prop-c-support-sla",
+      "sequence": 8,
+      "to_state": "ANALYZING"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-c",
+      "at": "2026-07-25T21:01:15.799426Z",
+      "detail": "prepared",
+      "evidence": {
+        "approval_required": "false",
+        "blast_radius": "0",
+        "context_source": "fixture",
+        "lease_id": "lease-155444ed0566",
+        "subgraph_fingerprint": "5dcc49fa7acbabd0"
+      },
+      "from_state": "ANALYZING",
+      "proposal_id": "prop-c-support-sla",
+      "sequence": 9,
+      "to_state": "PREPARED"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-c",
+      "at": "2026-07-25T21:01:15.898620Z",
+      "detail": "executing",
+      "evidence": {},
+      "from_state": "PREPARED",
+      "proposal_id": "prop-c-support-sla",
+      "sequence": 10,
+      "to_state": "EXECUTING"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-c",
+      "at": "2026-07-25T21:01:15.981258Z",
+      "detail": "validating",
+      "evidence": {},
+      "from_state": "EXECUTING",
+      "proposal_id": "prop-c-support-sla",
+      "sequence": 11,
+      "to_state": "VALIDATING"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-c",
+      "at": "2026-07-25T21:01:16.079722Z",
+      "detail": "committed",
+      "evidence": {
+        "artifact": "fct_support_sla.sql",
+        "checks_run": "1",
+        "context_source": "fixture",
+        "diff": "8 line(s) changed",
+        "failures": "none",
+        "fingerprint_at_commit": "5dcc49fa7acbabd0"
+      },
+      "from_state": "VALIDATING",
+      "proposal_id": "prop-c-support-sla",
+      "sequence": 12,
+      "to_state": "COMMITTED"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-a",
+      "at": "2026-07-25T21:01:16.247686Z",
+      "detail": "executing",
+      "evidence": {},
+      "from_state": "PREPARED",
+      "proposal_id": "prop-a-rename-revenue",
+      "sequence": 13,
+      "to_state": "EXECUTING"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-a",
+      "at": "2026-07-25T21:01:16.350896Z",
+      "detail": "validating",
+      "evidence": {},
+      "from_state": "EXECUTING",
+      "proposal_id": "prop-a-rename-revenue",
+      "sequence": 14,
+      "to_state": "VALIDATING"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-a",
+      "at": "2026-07-25T21:01:16.427086Z",
+      "detail": "committed",
+      "evidence": {
+        "artifact": "fct_revenue.sql",
+        "checks_run": "2",
+        "context_source": "fixture",
+        "diff": "1 line(s) changed",
+        "failures": "none",
+        "fingerprint_at_commit": "a4509bdbd64fd30b"
+      },
+      "from_state": "VALIDATING",
+      "proposal_id": "prop-a-rename-revenue",
+      "sequence": 15,
+      "to_state": "COMMITTED"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-b",
+      "at": "2026-07-25T21:01:16.545779Z",
+      "detail": "analyzing",
+      "evidence": {},
+      "from_state": "BLOCKED",
+      "proposal_id": "prop-b-net-revenue-metric",
+      "sequence": 16,
+      "to_state": "ANALYZING"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-b",
+      "at": "2026-07-25T21:01:16.704865Z",
+      "detail": "prepared",
+      "evidence": {
+        "approval_required": "true",
+        "blast_radius": "1",
+        "context_source": "fixture",
+        "lease_id": "lease-0360ebd30da0",
+        "subgraph_fingerprint": "f3e7aa0b6dc10ebb"
+      },
+      "from_state": "ANALYZING",
+      "proposal_id": "prop-b-net-revenue-metric",
+      "sequence": 17,
+      "to_state": "PREPARED"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-b",
+      "at": "2026-07-25T21:01:16.858308Z",
+      "detail": "executing",
+      "evidence": {},
+      "from_state": "PREPARED",
+      "proposal_id": "prop-b-net-revenue-metric",
+      "sequence": 18,
+      "to_state": "EXECUTING"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-b",
+      "at": "2026-07-25T21:01:17.069517Z",
+      "detail": "validating",
+      "evidence": {},
+      "from_state": "EXECUTING",
+      "proposal_id": "prop-b-net-revenue-metric",
+      "sequence": 19,
+      "to_state": "VALIDATING"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-b",
+      "at": "2026-07-25T21:01:17.215031Z",
+      "detail": "committed",
+      "evidence": {
+        "artifact": "metric_net_revenue.sql",
+        "checks_run": "1",
+        "context_source": "fixture",
+        "diff": "7 line(s) changed",
+        "failures": "none",
+        "fingerprint_at_commit": "f3e7aa0b6dc10ebb"
+      },
+      "from_state": "VALIDATING",
+      "proposal_id": "prop-b-net-revenue-metric",
+      "sequence": 20,
+      "to_state": "COMMITTED"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-d",
+      "at": "2026-07-25T21:01:17.399094Z",
+      "detail": "submitted",
+      "evidence": {},
+      "from_state": null,
+      "proposal_id": "prop-d-stale",
+      "sequence": 21,
+      "to_state": "SUBMITTED"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-d",
+      "at": "2026-07-25T21:01:17.486837Z",
+      "detail": "analyzing",
+      "evidence": {},
+      "from_state": "SUBMITTED",
+      "proposal_id": "prop-d-stale",
+      "sequence": 22,
+      "to_state": "ANALYZING"
+    },
+    {
+      "actor": "coordinator",
+      "agent_id": "agent-d",
+      "at": "2026-07-25T21:01:17.587800Z",
+      "detail": "Stale expected version for urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD)",
+      "evidence": {
+        "stale_urns": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD)"
+      },
+      "from_state": "ANALYZING",
+      "proposal_id": "prop-d-stale",
+      "sequence": 23,
+      "to_state": "ABORTED"
+    }
+  ],
+  "steps": [
+    {
+      "state": "PREPARED",
+      "step": "prepare-a"
+    },
+    {
+      "decision": "REBASE",
+      "explanation": "prop-a-rename-revenue writes urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD) (renaming column gross_revenue), which reaches urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.metric_net_revenue,PROD) used by prop-b-net-revenue-metric through 1 lineage hop(s): urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD) -> urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.metric_net_revenue,PROD). The declared read and write sets do not intersect; only the graph reveals this conflict.",
+      "lineage_path": [
+        "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD)",
+        "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.metric_net_revenue,PROD)"
+      ],
+      "step": "conflict"
+    },
+    {
+      "state": "COMMITTED",
+      "step": "commit-c"
+    },
+    {
+      "state": "COMMITTED",
+      "step": "commit-a"
+    },
+    {
+      "state": "COMMITTED",
+      "step": "commit-b"
+    },
+    {
+      "reason": "Stale expected version for urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD)",
+      "state": "ABORTED",
+      "step": "prepare-d"
+    }
+  ]
+}

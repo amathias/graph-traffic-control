@@ -79,6 +79,33 @@ class TestSeed:
         assert manifest_path.is_file()
         assert result["manifest"]["entity_count"] > 0
 
+    def test_seed_materialises_sql_artifacts(self, settings):
+        seed(settings)
+        artifacts = settings.state_dir / "artifacts"
+        names = sorted(p.name for p in artifacts.glob("*.sql"))
+        assert names == [
+            "fct_revenue.sql",
+            "fct_support_sla.sql",
+            "metric_net_revenue.sql",
+            "stg_sales.sql",
+        ]
+
+    def test_artifacts_encode_the_demo_dependency(self, settings):
+        """fct_revenue defines gross_revenue; the metric downstream consumes it."""
+        seed(settings)
+        artifacts = settings.state_dir / "artifacts"
+        assert "gross_revenue" in (artifacts / "fct_revenue.sql").read_text(encoding="utf-8")
+        assert "gross_revenue" in (
+            artifacts / "metric_net_revenue.sql"
+        ).read_text(encoding="utf-8")
+
+    def test_seeded_artifacts_are_byte_identical_across_runs(self, settings):
+        seed(settings)
+        first = (settings.state_dir / "artifacts" / "fct_revenue.sql").read_bytes()
+        seed(settings)
+        second = (settings.state_dir / "artifacts" / "fct_revenue.sql").read_bytes()
+        assert first == second
+
     def test_seed_is_deterministic(self, settings):
         seed(settings)
         first = (settings.state_dir / SEED_MANIFEST).read_text(encoding="utf-8")

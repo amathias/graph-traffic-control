@@ -1,0 +1,48 @@
+{
+  "action": {
+    "artifact_path": "metric_net_revenue.sql",
+    "field_path": null,
+    "kind": "redefine_metric",
+    "new_field_path": null,
+    "target_urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.metric_net_revenue,PROD)"
+  },
+  "agent": {
+    "agent_id": "agent-b",
+    "capabilities": [
+      "redefine_metric"
+    ],
+    "display_name": "Semantic Metric Agent"
+  },
+  "evidence": [
+    "Metric request ANALYTICS-338"
+  ],
+  "expected_versions": {},
+  "intent": "Publish net revenue metric derived from gross_revenue",
+  "proposal_id": "prop-b-net-revenue-metric",
+  "read_fields": [
+    {
+      "field_path": "gross_revenue",
+      "urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD)"
+    }
+  ],
+  "read_set": [
+    "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD)"
+  ],
+  "requested_lease_seconds": 120,
+  "risk": {
+    "blast_radius_hint": 1,
+    "level": "MEDIUM",
+    "requires_approval": false
+  },
+  "validation_plan": {
+    "expect_artifact_absent": [],
+    "expect_artifact_contains": [
+      "net_revenue"
+    ],
+    "expect_downstream_resolvable": false
+  },
+  "write_fields": [],
+  "write_set": [
+    "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.metric_net_revenue,PROD)"
+  ]
+}

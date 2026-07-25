@@ -59,6 +59,20 @@ class Settings(BaseSettings):
         """True when the coordinator has supplied live DataHub connection details."""
         return bool(self.datahub_gms_url and self.datahub_token)
 
+    @property
+    def live_mode(self) -> bool:
+        """True when this process should read real DataHub context through MCP.
+
+        Requires the token as well as the endpoint: an endpoint without credentials cannot
+        perform the authenticated checks readiness demands, so it is not live mode.
+        """
+        return bool(self.datahub_mcp_url and self.datahub_token)
+
+    @property
+    def db_path(self) -> Path:
+        """SQLite database holding proposals, leases, and the audit log."""
+        return self.state_dir / "transactions.sqlite"
+
     def _absolute(self, value: Path) -> Path:
         return value if value.is_absolute() else (REPO_ROOT / value)
 
