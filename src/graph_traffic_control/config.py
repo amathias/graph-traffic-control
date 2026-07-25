@@ -40,6 +40,20 @@ class Settings(BaseSettings):
     )
     datahub_urn_prefix: str = Field(default="traffic.", alias="DATAHUB_URN_PREFIX")
 
+    #: URN of the coordinator-allocated domain. Derived from the domain name by default so the
+    #: shared contract stays the single source of truth, but overridable if the shared instance
+    #: minted a different id.
+    datahub_domain_urn: str = Field(
+        default="urn:li:domain:graph-traffic-control", alias="DATAHUB_DOMAIN_URN"
+    )
+
+    #: ``operation`` argument for the MCP ``update_description`` tool. The argument *name* is
+    #: coordinator-observed; this *value* is not, so it is configurable rather than hardcoded.
+    #: See docs/LIMITATIONS.md.
+    datahub_description_operation: str = Field(
+        default="SET", alias="DATAHUB_DESCRIPTION_OPERATION"
+    )
+
     demo_fixture_root: Path = Field(
         default=Path("demo/fixtures/graph-traffic-control"), alias="DEMO_FIXTURE_ROOT"
     )

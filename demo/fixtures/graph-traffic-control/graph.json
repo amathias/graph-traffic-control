@@ -1,12 +1,14 @@
 {
-  "description": "Demo lineage graph for Graph Traffic Control. Every entity is inside the 'traffic.' allocation recorded in COORDINATOR_HANDOFF.md. Phase 5 re-records this file from the live shared DataHub instance so tests stay deterministic and offline.",
+  "description": "Demo lineage graph for Graph Traffic Control. Every entity is inside the 'traffic.' allocation recorded in COORDINATOR_HANDOFF.md, carries the project tag, and belongs to the project domain. Re-record this file from the shared DataHub instance once a live read has been performed, so the offline suite reflects observed shapes.",
   "source": "fixture",
   "namespace": {
     "urn_prefix": "traffic.",
     "domain": "Demo / Graph Traffic Control",
     "tag": "project-graph-traffic-control",
     "platform": "duckdb",
-    "env": "PROD"
+    "env": "PROD",
+    "domain_urn": "urn:li:domain:graph-traffic-control",
+    "tag_urn": "urn:li:tag:project-graph-traffic-control"
   },
   "datasets": [
     {
@@ -14,106 +16,264 @@
       "name": "traffic.raw_sales_orders",
       "description": "Raw sales order headers.",
       "criticality": "TIER_3",
-      "owners": ["sales-eng"],
+      "owners": [
+        "sales-eng"
+      ],
       "fields": [
-        {"path": "order_id", "type": "string"},
-        {"path": "customer_id", "type": "string"},
-        {"path": "order_ts", "type": "timestamp"},
-        {"path": "order_total", "type": "double"}
-      ]
+        {
+          "path": "order_id",
+          "type": "string"
+        },
+        {
+          "path": "customer_id",
+          "type": "string"
+        },
+        {
+          "path": "order_ts",
+          "type": "timestamp"
+        },
+        {
+          "path": "order_total",
+          "type": "double"
+        }
+      ],
+      "tags": [
+        "urn:li:tag:TIER_3",
+        "urn:li:tag:project-graph-traffic-control"
+      ],
+      "domain": "urn:li:domain:graph-traffic-control"
     },
     {
       "urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.raw_sales_line_items,PROD)",
       "name": "traffic.raw_sales_line_items",
       "description": "Raw sales order line items.",
       "criticality": "TIER_3",
-      "owners": ["sales-eng"],
+      "owners": [
+        "sales-eng"
+      ],
       "fields": [
-        {"path": "order_id", "type": "string"},
-        {"path": "sku", "type": "string"},
-        {"path": "quantity", "type": "int"},
-        {"path": "unit_price", "type": "double"},
-        {"path": "discount", "type": "double"}
-      ]
+        {
+          "path": "order_id",
+          "type": "string"
+        },
+        {
+          "path": "sku",
+          "type": "string"
+        },
+        {
+          "path": "quantity",
+          "type": "int"
+        },
+        {
+          "path": "unit_price",
+          "type": "double"
+        },
+        {
+          "path": "discount",
+          "type": "double"
+        }
+      ],
+      "tags": [
+        "urn:li:tag:TIER_3",
+        "urn:li:tag:project-graph-traffic-control"
+      ],
+      "domain": "urn:li:domain:graph-traffic-control"
     },
     {
       "urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.stg_sales,PROD)",
       "name": "traffic.stg_sales",
       "description": "Staged and conformed sales transactions.",
       "criticality": "TIER_2",
-      "owners": ["sales-eng"],
+      "owners": [
+        "sales-eng"
+      ],
       "fields": [
-        {"path": "order_id", "type": "string"},
-        {"path": "customer_id", "type": "string"},
-        {"path": "order_ts", "type": "timestamp"},
-        {"path": "line_amount", "type": "double"},
-        {"path": "discount_amount", "type": "double"}
-      ]
+        {
+          "path": "order_id",
+          "type": "string"
+        },
+        {
+          "path": "customer_id",
+          "type": "string"
+        },
+        {
+          "path": "order_ts",
+          "type": "timestamp"
+        },
+        {
+          "path": "line_amount",
+          "type": "double"
+        },
+        {
+          "path": "discount_amount",
+          "type": "double"
+        }
+      ],
+      "tags": [
+        "urn:li:tag:TIER_2",
+        "urn:li:tag:project-graph-traffic-control"
+      ],
+      "domain": "urn:li:domain:graph-traffic-control"
     },
     {
       "urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD)",
       "name": "traffic.fct_revenue",
       "description": "Revenue fact table. The column Agent A renames, and the table Agent B reads through.",
       "criticality": "TIER_1",
-      "owners": ["finance-data"],
+      "owners": [
+        "finance-data"
+      ],
       "fields": [
-        {"path": "order_id", "type": "string"},
-        {"path": "customer_id", "type": "string"},
-        {"path": "recognized_at", "type": "timestamp"},
-        {"path": "gross_revenue", "type": "double"},
-        {"path": "refund_amount", "type": "double"}
-      ]
+        {
+          "path": "order_id",
+          "type": "string"
+        },
+        {
+          "path": "customer_id",
+          "type": "string"
+        },
+        {
+          "path": "recognized_at",
+          "type": "timestamp"
+        },
+        {
+          "path": "gross_revenue",
+          "type": "double"
+        },
+        {
+          "path": "refund_amount",
+          "type": "double"
+        }
+      ],
+      "tags": [
+        "urn:li:tag:TIER_1",
+        "urn:li:tag:project-graph-traffic-control"
+      ],
+      "domain": "urn:li:domain:graph-traffic-control"
     },
     {
       "urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.metric_net_revenue,PROD)",
       "name": "traffic.metric_net_revenue",
       "description": "Semantic net-revenue metric. Depends on traffic.fct_revenue.gross_revenue.",
       "criticality": "TIER_1",
-      "owners": ["analytics-eng"],
+      "owners": [
+        "analytics-eng"
+      ],
       "fields": [
-        {"path": "period", "type": "string"},
-        {"path": "net_revenue", "type": "double"}
-      ]
+        {
+          "path": "period",
+          "type": "string"
+        },
+        {
+          "path": "net_revenue",
+          "type": "double"
+        }
+      ],
+      "tags": [
+        "urn:li:tag:TIER_1",
+        "urn:li:tag:project-graph-traffic-control"
+      ],
+      "domain": "urn:li:domain:graph-traffic-control"
     },
     {
       "urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.raw_support_tickets,PROD)",
       "name": "traffic.raw_support_tickets",
       "description": "Raw customer support tickets. Lineage-disjoint from the revenue branch.",
       "criticality": "TIER_3",
-      "owners": ["support-eng"],
+      "owners": [
+        "support-eng"
+      ],
       "fields": [
-        {"path": "ticket_id", "type": "string"},
-        {"path": "customer_id", "type": "string"},
-        {"path": "opened_at", "type": "timestamp"},
-        {"path": "closed_at", "type": "timestamp"},
-        {"path": "priority", "type": "string"}
-      ]
+        {
+          "path": "ticket_id",
+          "type": "string"
+        },
+        {
+          "path": "customer_id",
+          "type": "string"
+        },
+        {
+          "path": "opened_at",
+          "type": "timestamp"
+        },
+        {
+          "path": "closed_at",
+          "type": "timestamp"
+        },
+        {
+          "path": "priority",
+          "type": "string"
+        }
+      ],
+      "tags": [
+        "urn:li:tag:TIER_3",
+        "urn:li:tag:project-graph-traffic-control"
+      ],
+      "domain": "urn:li:domain:graph-traffic-control"
     },
     {
       "urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.stg_support,PROD)",
       "name": "traffic.stg_support",
       "description": "Staged support tickets.",
       "criticality": "TIER_3",
-      "owners": ["support-eng"],
+      "owners": [
+        "support-eng"
+      ],
       "fields": [
-        {"path": "ticket_id", "type": "string"},
-        {"path": "customer_id", "type": "string"},
-        {"path": "opened_at", "type": "timestamp"},
-        {"path": "resolution_minutes", "type": "int"},
-        {"path": "priority", "type": "string"}
-      ]
+        {
+          "path": "ticket_id",
+          "type": "string"
+        },
+        {
+          "path": "customer_id",
+          "type": "string"
+        },
+        {
+          "path": "opened_at",
+          "type": "timestamp"
+        },
+        {
+          "path": "resolution_minutes",
+          "type": "int"
+        },
+        {
+          "path": "priority",
+          "type": "string"
+        }
+      ],
+      "tags": [
+        "urn:li:tag:TIER_3",
+        "urn:li:tag:project-graph-traffic-control"
+      ],
+      "domain": "urn:li:domain:graph-traffic-control"
     },
     {
       "urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_support_sla,PROD)",
       "name": "traffic.fct_support_sla",
       "description": "Support SLA attainment fact. Agent C's write target.",
       "criticality": "TIER_2",
-      "owners": ["support-eng"],
+      "owners": [
+        "support-eng"
+      ],
       "fields": [
-        {"path": "period", "type": "string"},
-        {"path": "priority", "type": "string"},
-        {"path": "sla_attainment", "type": "double"}
-      ]
+        {
+          "path": "period",
+          "type": "string"
+        },
+        {
+          "path": "priority",
+          "type": "string"
+        },
+        {
+          "path": "sla_attainment",
+          "type": "double"
+        }
+      ],
+      "tags": [
+        "urn:li:tag:TIER_2",
+        "urn:li:tag:project-graph-traffic-control"
+      ],
+      "domain": "urn:li:domain:graph-traffic-control"
     }
   ],
   "dashboards": [
@@ -122,7 +282,14 @@
       "name": "traffic.dash_exec_revenue",
       "description": "Executive revenue dashboard. Downstream blast radius for the revenue branch.",
       "criticality": "TIER_1",
-      "owners": ["finance-data"]
+      "owners": [
+        "finance-data"
+      ],
+      "tags": [
+        "urn:li:tag:TIER_1",
+        "urn:li:tag:project-graph-traffic-control"
+      ],
+      "domain": "urn:li:domain:graph-traffic-control"
     }
   ],
   "edges": [

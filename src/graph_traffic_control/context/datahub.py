@@ -5,21 +5,45 @@ Reads only this project's allocated entities. The allocated URN list is supplied
 the ``traffic.`` namespace by construction and makes the read set deterministic. Every URN is
 still passed through the namespace guard.
 
-Response-shape caution
-----------------------
-``mcp-server-datahub`` returns tool output as JSON text whose exact shape is not pinned by this
-project. The extractors below accept several plausible shapes and fall back rather than raising,
-because a shape mismatch must degrade to "field unknown", never to a wrong conflict decision.
-These extractors have **not** been exercised against a live DataHub Core v1.6.0 instance from
-this session; see ``docs/LIMITATIONS.md``.
+Tool contract
+-------------
+These are the coordinator-observed contracts for the pinned DataHub MCP server. They are
+implemented exactly, not guessed at:
+
+===================== ================================== ==========================================
+Tool                  Arguments                          Payload location
+===================== ================================== ==========================================
+``get_entities``      ``urns``                           ``structuredContent.result``
+``get_lineage``       ``urn``, ``upstream``,             ``structuredContent.downstreams``
+                      ``max_hops``, ``max_results``      ``.searchResults[*].entity.urn``
+``list_schema_fields`` ``urn``, ``limit``                ``structuredContent.fields``
+``update_description`` ``entity_urn``, ``description``,  (see :mod:`..writeback.datahub`)
+                      ``operation``
+===================== ================================== ==========================================
+
+Entity governance fields are nested under ``properties``, ``ownership``, ``tags``, and ``domain``.
+
+Fail-closed reading
+-------------------
+An earlier revision of this module tolerated several plausible payload shapes and degraded to
+"field unknown" on a mismatch, and swallowed MCP errors into an empty edge list. That is
+**wrong**, and the coordinator rejected it: an empty graph is indistinguishable from a graph with
+no conflicts, so a swallowed failure silently converts "the coordinator cannot see the graph" into
+"nothing conflicts, commit away".
+
+Every read here therefore raises :class:`~graph_traffic_control.context.provider.ContextReadError`
+on a transport failure, a tool error, or a response whose shape is not the contract above. Absent
+*optional governance* values (an entity with no description, no owners, no domain) are legitimate
+and yield ``None``/empty — that is a value, not an unknown shape.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from graph_traffic_control.context.mcp_client import McpClient, McpError
+from graph_traffic_control.context.mcp_client import McpClient, McpContractError, McpError
 from graph_traffic_control.context.namespace import Namespace
+from graph_traffic_control.context.provider import ContextReadError
 from graph_traffic_control.domain.clock import Clock, SystemClock
 from graph_traffic_control.domain.models import (
     Criticality,
@@ -40,98 +64,267 @@ REQUIRED_READ_TOOLS = frozenset({TOOL_GET_ENTITIES, TOOL_GET_LINEAGE, TOOL_LIST_
 #: Write tools needed for the reversible writeback.
 REQUIRED_WRITE_TOOLS = frozenset({TOOL_UPDATE_DESCRIPTION})
 
+#: One hop per allocated entity. Every edge inside the allocation is discovered because every
+#: allocated entity is queried, so a deeper per-call walk would only re-read known edges.
+LINEAGE_MAX_HOPS = 1
 
-def _as_list(value: Any) -> list[Any]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return value
+#: Bounds on a single tool response. Large enough for the demo graph with headroom; small enough
+#: that a runaway response is refused rather than paged in.
+LINEAGE_MAX_RESULTS = 200
+SCHEMA_FIELD_LIMIT = 500
+
+#: URN prefixes whose entities carry a schema. ``list_schema_fields`` is only called for these.
+#: A dashboard has no columns, so asking for them and then tolerating the resulting error would
+#: reintroduce exactly the error-swallowing this module must not do.
+SCHEMA_BEARING_URN_PREFIXES = ("urn:li:dataset:",)
+
+
+# --------------------------------------------------------------------------------------
+# Envelope readers. These enforce the contract and raise on anything else.
+# --------------------------------------------------------------------------------------
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    """A nested container, or an empty mapping when the field is legitimately absent."""
+    return value if isinstance(value, dict) else {}
+
+
+def _text(value: Any) -> str | None:
+    """A string value from either a bare string or a ``{"string": ...}``-style wrapper."""
+    if isinstance(value, str):
+        return value.strip() or None
     if isinstance(value, dict):
-        for key in ("entities", "results", "items", "fields", "relationships"):
-            if isinstance(value.get(key), list):
-                return value[key]
-    return [value]
-
-
-def _first_str(payload: Any, *keys: str) -> str | None:
-    if not isinstance(payload, dict):
-        return None
-    for key in keys:
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value
-        if isinstance(value, dict):
-            nested = value.get("string") or value.get("value") or value.get("description")
+        for key in ("string", "value", "urn"):
+            nested = value.get(key)
             if isinstance(nested, str) and nested.strip():
-                return nested
+                return nested.strip()
     return None
 
 
-def extract_description(entity_payload: Any) -> str | None:
-    """Best-effort description extraction across plausible payload shapes."""
-    direct = _first_str(entity_payload, "description", "editableDescription")
-    if direct:
-        return direct
-    if isinstance(entity_payload, dict):
-        for container in ("properties", "editableProperties", "datasetProperties"):
-            nested = entity_payload.get(container)
-            found = _first_str(nested, "description")
+def entities_from_result(payload: dict[str, Any], requested: list[str]) -> dict[str, Any]:
+    """Read ``get_entities`` output from ``structuredContent.result``.
+
+    Accepts the two forms the contract can legitimately take for a multi-URN request: a list of
+    entity objects, or a mapping of URN to entity object. Anything else raises.
+    """
+    if "result" not in payload:
+        raise McpContractError(
+            f"{TOOL_GET_ENTITIES} response has no 'result' key under structuredContent "
+            f"(keys: {sorted(payload)})."
+        )
+    result = payload["result"]
+
+    by_urn: dict[str, Any] = {}
+    if isinstance(result, list):
+        for item in result:
+            if not isinstance(item, dict):
+                raise McpContractError(
+                    f"{TOOL_GET_ENTITIES} result contains a {type(item).__name__}, not an entity."
+                )
+            urn = item.get("urn")
+            if not isinstance(urn, str) or not urn:
+                raise McpContractError(
+                    f"{TOOL_GET_ENTITIES} result contains an entity with no 'urn'."
+                )
+            by_urn[urn] = item
+    elif isinstance(result, dict):
+        if isinstance(result.get("urn"), str):
+            by_urn[result["urn"]] = result
+        else:
+            for urn, item in result.items():
+                if not isinstance(item, dict):
+                    raise McpContractError(
+                        f"{TOOL_GET_ENTITIES} result[{urn!r}] is a {type(item).__name__}, "
+                        "not an entity."
+                    )
+                by_urn[urn] = item
+    else:
+        raise McpContractError(
+            f"{TOOL_GET_ENTITIES} result is a {type(result).__name__}; expected a list of "
+            "entities or a mapping of URN to entity."
+        )
+
+    missing = [urn for urn in requested if urn not in by_urn]
+    if missing:
+        raise McpContractError(
+            f"{TOOL_GET_ENTITIES} did not return {', '.join(missing)}. An allocated entity that "
+            "is absent from DataHub is a seeding failure, not an empty graph."
+        )
+    return by_urn
+
+
+def present_urns_from_result(payload: dict[str, Any]) -> set[str]:
+    """URNs a ``get_entities`` response actually returned.
+
+    Same envelope contract as :func:`entities_from_result`, but absence is reported rather than
+    raised: readiness needs to say *which* allocated entities are missing, and a missing entity
+    is a legitimate (unready) answer rather than a protocol violation.
+    """
+    return set(entities_from_result(payload, []))
+
+
+def downstream_urns_from_lineage(payload: dict[str, Any]) -> list[str]:
+    """Read ``get_lineage`` output from ``structuredContent.downstreams.searchResults``."""
+    if "downstreams" not in payload:
+        raise McpContractError(
+            f"{TOOL_GET_LINEAGE} response has no 'downstreams' key under structuredContent "
+            f"(keys: {sorted(payload)})."
+        )
+    downstreams = payload["downstreams"]
+    if not isinstance(downstreams, dict):
+        raise McpContractError(
+            f"{TOOL_GET_LINEAGE} 'downstreams' is a {type(downstreams).__name__}; "
+            "expected an object with 'searchResults'."
+        )
+    results = downstreams.get("searchResults")
+    if not isinstance(results, list):
+        raise McpContractError(
+            f"{TOOL_GET_LINEAGE} downstreams.searchResults is a {type(results).__name__}; "
+            "expected a list."
+        )
+
+    urns: list[str] = []
+    for item in results:
+        if not isinstance(item, dict):
+            raise McpContractError(
+                f"{TOOL_GET_LINEAGE} searchResults contains a {type(item).__name__}."
+            )
+        entity = item.get("entity")
+        if not isinstance(entity, dict):
+            raise McpContractError(
+                f"{TOOL_GET_LINEAGE} searchResults entry has no 'entity' object."
+            )
+        urn = entity.get("urn")
+        if not isinstance(urn, str) or not urn:
+            raise McpContractError(
+                f"{TOOL_GET_LINEAGE} searchResults entity has no 'urn' string."
+            )
+        urns.append(urn)
+    return urns
+
+
+def fields_from_payload(payload: dict[str, Any]) -> list[SchemaField]:
+    """Read ``list_schema_fields`` output from ``structuredContent.fields``."""
+    if "fields" not in payload:
+        raise McpContractError(
+            f"{TOOL_LIST_SCHEMA_FIELDS} response has no 'fields' key under structuredContent "
+            f"(keys: {sorted(payload)})."
+        )
+    raw_fields = payload["fields"]
+    if not isinstance(raw_fields, list):
+        raise McpContractError(
+            f"{TOOL_LIST_SCHEMA_FIELDS} 'fields' is a {type(raw_fields).__name__}; "
+            "expected a list."
+        )
+
+    fields: list[SchemaField] = []
+    for raw in raw_fields:
+        if not isinstance(raw, dict):
+            raise McpContractError(
+                f"{TOOL_LIST_SCHEMA_FIELDS} fields contains a {type(raw).__name__}."
+            )
+        path = _text(raw.get("fieldPath")) or _text(raw.get("path"))
+        if not path:
+            raise McpContractError(
+                f"{TOOL_LIST_SCHEMA_FIELDS} returned a field with no fieldPath: {sorted(raw)}."
+            )
+        type_name = (
+            _text(raw.get("nativeDataType")) or _text(raw.get("type")) or "unknown"
+        )
+        fields.append(SchemaField(path=path, type=type_name))
+    return fields
+
+
+# --------------------------------------------------------------------------------------
+# Governance extraction. Nested under properties / ownership / tags / domain.
+# --------------------------------------------------------------------------------------
+
+
+def extract_name(entity: dict[str, Any], urn: str) -> str:
+    properties = _mapping(entity.get("properties"))
+    return (
+        _text(properties.get("name"))
+        or _text(properties.get("qualifiedName"))
+        or _text(entity.get("name"))
+        or urn
+    )
+
+
+def extract_description(entity: dict[str, Any]) -> str | None:
+    """Description from ``properties``, preferring an editable override when present."""
+    editable = _mapping(entity.get("editableProperties"))
+    edited = _text(editable.get("description"))
+    if edited:
+        return edited
+    return _text(_mapping(entity.get("properties")).get("description"))
+
+
+def extract_owners(entity: dict[str, Any]) -> list[str]:
+    """Owner URNs from ``ownership.owners[*].owner``."""
+    owners_container = _mapping(entity.get("ownership")).get("owners")
+    if not isinstance(owners_container, list):
+        return []
+    owners: list[str] = []
+    for raw in owners_container:
+        owner = _text(raw) if not isinstance(raw, dict) else _text(raw.get("owner")) or _text(raw)
+        if owner:
+            owners.append(owner)
+    return owners
+
+
+def extract_tags(entity: dict[str, Any]) -> list[str]:
+    """Tag URNs from ``tags.tags[*].tag``."""
+    tags_container = _mapping(entity.get("tags")).get("tags")
+    if not isinstance(tags_container, list):
+        return []
+    tags: list[str] = []
+    for raw in tags_container:
+        tag = _text(raw) if not isinstance(raw, dict) else _text(raw.get("tag")) or _text(raw)
+        if tag:
+            tags.append(tag)
+    return sorted(set(tags))
+
+
+def extract_domain(entity: dict[str, Any]) -> str | None:
+    """Domain URN from ``domain.domain``, or the first of ``domain.domains``."""
+    container = _mapping(entity.get("domain"))
+    single = _text(container.get("domain"))
+    if single:
+        return single
+    domains = container.get("domains")
+    if isinstance(domains, list):
+        for raw in domains:
+            found = _text(raw)
             if found:
                 return found
     return None
 
 
-def extract_criticality(entity_payload: Any) -> Criticality:
-    """Map a DataHub tier/criticality signal onto the project's enum, defaulting to UNKNOWN."""
-    raw = _first_str(entity_payload, "criticality", "tier")
-    if raw is None and isinstance(entity_payload, dict):
-        tags = entity_payload.get("tags") or entity_payload.get("globalTags")
-        for tag in _as_list(tags):
-            name = tag if isinstance(tag, str) else _first_str(tag, "name", "urn", "tag") or ""
-            upper = name.upper().replace("-", "_")
-            for tier in ("TIER_1", "TIER_2", "TIER_3"):
-                if tier in upper:
-                    return Criticality(tier)
-        return Criticality.UNKNOWN
-    if raw is None:
-        return Criticality.UNKNOWN
-    upper = raw.upper().replace("-", "_")
-    for tier in ("TIER_1", "TIER_2", "TIER_3"):
-        if tier in upper:
-            return Criticality(tier)
+def extract_criticality(entity: dict[str, Any]) -> Criticality:
+    """Map a tier tag or an explicit criticality property onto the project's enum."""
+    candidates = [
+        *extract_tags(entity),
+        _text(_mapping(entity.get("properties")).get("criticality")) or "",
+        _text(_mapping(_mapping(entity.get("properties")).get("customProperties")).get("tier"))
+        or "",
+    ]
+    for candidate in candidates:
+        upper = candidate.upper().replace("-", "_")
+        for tier in ("TIER_1", "TIER_2", "TIER_3"):
+            if tier in upper:
+                return Criticality(tier)
     return Criticality.UNKNOWN
 
 
-def extract_owners(entity_payload: Any) -> list[str]:
-    if not isinstance(entity_payload, dict):
-        return []
-    owners: list[str] = []
-    for owner in _as_list(entity_payload.get("owners") or entity_payload.get("ownership")):
-        if isinstance(owner, str):
-            owners.append(owner)
-        else:
-            name = _first_str(owner, "owner", "urn", "name")
-            if name:
-                owners.append(name)
-    return owners
-
-
-def extract_fields(payload: Any) -> list[SchemaField]:
-    fields: list[SchemaField] = []
-    for raw in _as_list(payload):
-        if isinstance(raw, str):
-            fields.append(SchemaField(path=raw))
-            continue
-        path = _first_str(raw, "fieldPath", "path", "name")
-        if not path:
-            continue
-        type_name = _first_str(raw, "type", "nativeDataType", "dataType") or "unknown"
-        fields.append(SchemaField(path=path, type=type_name))
-    return fields
+# --------------------------------------------------------------------------------------
 
 
 class DataHubContextProvider:
-    """Reads the allocated ``traffic.`` subgraph from DataHub through MCP."""
+    """Reads the allocated ``traffic.`` subgraph from DataHub through MCP.
+
+    Any failure to read any allocated entity aborts the whole snapshot. Partial graphs are not
+    produced, because a missing entity or a missing edge changes conflict decisions.
+    """
 
     source = "datahub-mcp"
 
@@ -150,69 +343,84 @@ class DataHubContextProvider:
         self._clock = clock or SystemClock()
 
     def snapshot(self) -> GraphSnapshot:
+        if not self._allocated:
+            raise ContextReadError(
+                "No allocated entities to read. Run `gtc-seed` so the manifest lists this "
+                "project's traffic. entities; an empty allocation would produce an empty graph "
+                "that falsely reports no conflicts."
+            )
+
         entities: dict[str, EntityContext] = {}
-        edges: list[LineageEdge] = []
+        edges: set[tuple[str, str]] = set()
 
         for urn in self._allocated:
             entities[urn] = self._read_entity(urn)
-            edges.extend(self._read_downstream_edges(urn))
+            for downstream in self._read_downstream_urns(urn):
+                edges.add((urn, downstream))
 
-        # De-duplicate while preserving determinism.
-        unique = {(e.upstream, e.downstream) for e in edges}
-        ordered = [LineageEdge(upstream=u, downstream=d) for u, d in sorted(unique)]
-
+        ordered = [LineageEdge(upstream=u, downstream=d) for u, d in sorted(edges)]
         return GraphSnapshot(
             entities=entities, edges=ordered, captured_at=self._clock.now()
         )
 
-    def _read_entity(self, urn: str) -> EntityContext:
-        payload = self._client.call_tool(TOOL_GET_ENTITIES, {"urns": [urn]})
-        entity = self._select_entity(payload, urn)
+    # -- reads -------------------------------------------------------------------------
 
+    def _read_entity(self, urn: str) -> EntityContext:
         try:
-            field_payload = self._client.call_tool(TOOL_LIST_SCHEMA_FIELDS, {"urn": urn})
-            fields = extract_fields(field_payload)
-        except McpError:
-            # A dashboard has no schema fields; absence must not fail the whole snapshot.
-            fields = []
+            payload = self._client.call_tool_structured(TOOL_GET_ENTITIES, {"urns": [urn]})
+            entity = entities_from_result(payload, [urn])[urn]
+        except McpError as exc:
+            raise ContextReadError(f"Could not read {urn} from DataHub: {exc}") from None
 
         return EntityContext(
             urn=urn,
-            name=_first_str(entity, "name", "qualifiedName") or urn,
+            name=extract_name(entity, urn),
             description=extract_description(entity),
             criticality=extract_criticality(entity),
             owners=extract_owners(entity),
-            fields=fields,
+            tags=extract_tags(entity),
+            domain=extract_domain(entity),
+            fields=self._read_fields(urn),
         )
 
-    @staticmethod
-    def _select_entity(payload: Any, urn: str) -> dict[str, Any]:
-        for candidate in _as_list(payload):
-            if isinstance(candidate, dict) and candidate.get("urn") == urn:
-                return candidate
-        for candidate in _as_list(payload):
-            if isinstance(candidate, dict):
-                return candidate
-        return {}
-
-    def _read_downstream_edges(self, urn: str) -> list[LineageEdge]:
-        """Read one hop downstream. Edges leaving the allocation are dropped, not followed."""
-        try:
-            payload = self._client.call_tool(
-                TOOL_GET_LINEAGE, {"urn": urn, "direction": "DOWNSTREAM", "hops": 1}
-            )
-        except McpError:
+    def _read_fields(self, urn: str) -> list[SchemaField]:
+        if not urn.startswith(SCHEMA_BEARING_URN_PREFIXES):
+            # Not a schema-bearing entity type. Not asking is correct; tolerating an error
+            # would be the failure-swallowing this module exists to avoid.
             return []
-
-        edges: list[LineageEdge] = []
-        for raw in _as_list(payload):
-            downstream = (
-                raw if isinstance(raw, str) else _first_str(raw, "urn", "entity", "downstream")
+        try:
+            payload = self._client.call_tool_structured(
+                TOOL_LIST_SCHEMA_FIELDS, {"urn": urn, "limit": SCHEMA_FIELD_LIMIT}
             )
-            if not downstream or downstream == urn:
-                continue
-            # Never admit another project's entity into this project's graph.
-            if not self._namespace.contains(downstream):
-                continue
-            edges.append(LineageEdge(upstream=urn, downstream=downstream))
-        return edges
+            return fields_from_payload(payload)
+        except McpError as exc:
+            raise ContextReadError(
+                f"Could not read schema fields for {urn}: {exc}"
+            ) from None
+
+    def _read_downstream_urns(self, urn: str) -> list[str]:
+        """One hop downstream. Edges leaving the allocation are dropped, not followed."""
+        try:
+            payload = self._client.call_tool_structured(
+                TOOL_GET_LINEAGE,
+                {
+                    "urn": urn,
+                    "upstream": False,
+                    "max_hops": LINEAGE_MAX_HOPS,
+                    "max_results": LINEAGE_MAX_RESULTS,
+                },
+            )
+            downstreams = downstream_urns_from_lineage(payload)
+        except McpError as exc:
+            raise ContextReadError(
+                f"Could not read downstream lineage for {urn}: {exc}. Refusing to continue with "
+                "an incomplete graph."
+            ) from None
+
+        # Dropping a foreign downstream is a namespace decision about a value the server did
+        # return, not a swallowed failure.
+        return [
+            downstream
+            for downstream in downstreams
+            if downstream != urn and self._namespace.contains(downstream)
+        ]

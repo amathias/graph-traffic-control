@@ -54,10 +54,10 @@ class TestHandshake:
 
 class TestToolCalls:
     def test_tool_result_json_is_decoded(self, server):
-        server.state.entities["urn:li:dataset:x"] = {"urn": "urn:li:dataset:x", "name": "x"}
+        server.state.add_entity("urn:li:dataset:x", name="x")
         with McpClient(server.url, TOKEN) as client:
             result = client.call_tool("get_entities", {"urns": ["urn:li:dataset:x"]})
-        assert result == [{"urn": "urn:li:dataset:x", "name": "x"}]
+        assert result == {"result": [server.state.entities["urn:li:dataset:x"]]}
 
     def test_tool_error_raises_mcp_error(self, server):
         server.state.fail_tools.add("get_lineage")
@@ -66,11 +66,21 @@ class TestToolCalls:
                 client.call_tool("get_lineage", {"urn": "x"})
 
     def test_arguments_reach_the_server(self, server):
+        arguments = {"urn": "abc", "upstream": False, "max_hops": 1, "max_results": 10}
         with McpClient(server.url, TOKEN) as client:
-            client.call_tool("get_lineage", {"urn": "abc", "direction": "DOWNSTREAM"})
-        name, arguments = server.state.calls[-1]
+            client.call_tool("get_lineage", arguments)
+        name, received = server.state.calls[-1]
         assert name == "get_lineage"
-        assert arguments["direction"] == "DOWNSTREAM"
+        assert received == arguments
+
+    def test_structured_content_is_required_when_the_caller_depends_on_it(self, server):
+        """A response with no structuredContent is a contract violation, not a fallback."""
+        server.state.add_entity("urn:li:dataset:x", name="x")
+        with McpClient(server.url, TOKEN) as client:
+            structured = client.call_tool_structured(
+                "get_entities", {"urns": ["urn:li:dataset:x"]}
+            )
+        assert "result" in structured
 
 
 class TestTransportVariants:

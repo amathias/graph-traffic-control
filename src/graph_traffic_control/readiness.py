@@ -5,9 +5,11 @@ Two hard rules, both from the coordinator's live-milestone instruction:
 1. **Non-mutating.** Readiness may not write anything, anywhere — not a probe file, not a tag,
    not a description. Writability is tested with ``os.access``, never with a real write.
 2. **A basic GMS health response is never sufficient.** In live mode the project is ready only
-   after an *authenticated* check that the required MCP tools exist, that this project's tag is
-   resolvable, and that its allocated ``traffic.`` entities are actually present. An unauthenticated
-   liveness ping proves a container is up, not that the coordinator can do its job.
+   after an *authenticated* check that every required MCP tool exists, that this project's tag and
+   domain both resolve, and that the **complete** allocated ``traffic.`` catalogue is present —
+   not a sample of it. An unauthenticated liveness ping proves a container is up, not that the
+   coordinator can do its job, and a partially ingested catalogue yields a partial graph that
+   reports fewer conflicts than really exist.
 
 Mode is derived, not configured: live mode requires both ``DATAHUB_MCP_URL`` and ``DATAHUB_TOKEN``.
 In fixture mode the service is ready only in a local or test environment, so a deployed instance
@@ -26,6 +28,7 @@ from graph_traffic_control.context.datahub import (
     REQUIRED_READ_TOOLS,
     REQUIRED_WRITE_TOOLS,
     TOOL_GET_ENTITIES,
+    present_urns_from_result,
 )
 from graph_traffic_control.context.mcp_client import McpClient, McpError
 from graph_traffic_control.context.namespace import Namespace, NamespaceViolation
@@ -38,6 +41,10 @@ from graph_traffic_control.execute.targets import ARTIFACTS_DIRNAME
 
 #: Environments where running fixture-backed is a legitimate ready state.
 FIXTURE_OK_ENVIRONMENTS = frozenset({"local", "test", "dev"})
+
+#: Allocated URNs verified per ``get_entities`` call. Bounded so a large allocation cannot turn
+#: readiness into one enormous request, while still verifying the catalogue in full.
+ENTITY_PROBE_BATCH = 20
 
 ClientFactory = Callable[[Settings], McpClient]
 
@@ -143,27 +150,38 @@ def check_datahub(
                 "detail": "The MCP server does not expose the tools this project requires.",
             }
 
-        # Authenticated check that this project's tag resolves.
+        # Authenticated check that this project's governance objects resolve.
         tag_urn = f"urn:li:tag:{namespace.project_tag}"
+        domain_urn = settings.datahub_domain_urn
         try:
-            tag_payload = client.call_tool(TOOL_GET_ENTITIES, {"urns": [tag_urn]})
+            governance = _present(client, [tag_urn, domain_urn])
         except McpError as exc:
             return {
                 **result,
                 "ok": False,
-                "status": "tag_unverified",
-                "detail": f"Could not resolve {tag_urn}: {exc}",
+                "status": "governance_unverified",
+                "detail": f"Could not resolve {tag_urn} / {domain_urn}: {exc}",
             }
-        if not _payload_mentions(tag_payload, tag_urn):
+        if tag_urn not in governance:
             return {
                 **result,
                 "ok": False,
                 "status": "tag_missing",
                 "detail": f"{tag_urn} is not present in DataHub.",
             }
+        if domain_urn not in governance:
+            return {
+                **result,
+                "ok": False,
+                "status": "domain_missing",
+                "detail": f"{domain_urn} is not present in DataHub.",
+            }
         result["tag_verified"] = namespace.project_tag
+        result["domain_verified"] = domain_urn
 
-        # Authenticated check that allocated entities exist.
+        # Authenticated check that the *complete* allocation exists. A sample is not enough:
+        # a partially ingested catalogue produces a partial graph, and a partial graph reports
+        # fewer conflicts than really exist.
         if not allocated_urns:
             return {
                 **result,
@@ -176,9 +194,9 @@ def check_datahub(
         except NamespaceViolation as exc:
             return {**result, "ok": False, "status": "namespace_violation", "detail": str(exc)}
 
-        probe = sorted(allocated_urns)[:5]
+        expected = sorted(set(allocated_urns))
         try:
-            entity_payload = client.call_tool(TOOL_GET_ENTITIES, {"urns": probe})
+            found = _present(client, expected)
         except McpError as exc:
             return {
                 **result,
@@ -187,17 +205,19 @@ def check_datahub(
                 "detail": f"Could not read allocated entities: {exc}",
             }
 
-        found = [urn for urn in probe if _payload_mentions(entity_payload, urn)]
-        result["allocated_entities_probed"] = len(probe)
-        result["allocated_entities_found"] = len(found)
-        if len(found) != len(probe):
-            missing = sorted(set(probe) - set(found))
+        result["allocated_entities_expected"] = len(expected)
+        result["allocated_entities_found"] = len(found & set(expected))
+        missing = sorted(set(expected) - found)
+        if missing:
             return {
                 **result,
                 "ok": False,
                 "status": "entities_missing",
                 "missing": missing,
-                "detail": "Allocated traffic. entities are not present in DataHub. Ingest first.",
+                "detail": (
+                    f"{len(missing)} of {len(expected)} allocated traffic. entities are absent "
+                    "from DataHub. Run the namespace-scoped seed before serving."
+                ),
             }
 
         return {**result, "ok": True, "status": "verified"}
@@ -205,17 +225,14 @@ def check_datahub(
         client.close()
 
 
-def _payload_mentions(payload: Any, urn: str) -> bool:
-    """True when a tool payload actually contains the requested URN."""
-    if isinstance(payload, str):
-        return urn in payload
-    if isinstance(payload, dict):
-        if payload.get("urn") == urn:
-            return True
-        return any(_payload_mentions(value, urn) for value in payload.values())
-    if isinstance(payload, list):
-        return any(_payload_mentions(item, urn) for item in payload)
-    return False
+def _present(client: McpClient, urns: list[str]) -> set[str]:
+    """URNs DataHub actually returns, read in bounded batches. Never mutates."""
+    found: set[str] = set()
+    for start in range(0, len(urns), ENTITY_PROBE_BATCH):
+        batch = urns[start : start + ENTITY_PROBE_BATCH]
+        payload = client.call_tool_structured(TOOL_GET_ENTITIES, {"urns": batch})
+        found |= present_urns_from_result(payload)
+    return found
 
 
 def evaluate(

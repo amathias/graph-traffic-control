@@ -159,10 +159,21 @@ class EntityContext(Strict):
     description: str | None = None
     criticality: Criticality = Criticality.UNKNOWN
     owners: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    domain: str | None = None
     fields: list[SchemaField] = Field(default_factory=list)
 
     def version_fingerprint(self) -> str:
-        """Stable fingerprint of the parts a proposal can be stale against."""
+        """Stable fingerprint of the parts a proposal can be stale against.
+
+        Schema, criticality, ownership, tags, and domain are all included: a governance change
+        under a proposal's feet is real drift, and a proposal that prepared against the old
+        ownership or tier must be rechecked rather than committed.
+
+        The description is deliberately excluded. The reversible writeback rewrites and restores
+        it during commit, so including it would make every commit look like drift to the next
+        proposal.
+        """
         from hashlib import sha256
 
         payload = "|".join(
@@ -170,6 +181,9 @@ class EntityContext(Strict):
                 self.urn,
                 self.criticality.value,
                 ",".join(sorted(f"{f.path}:{f.type}" for f in self.fields)),
+                ",".join(sorted(self.owners)),
+                ",".join(sorted(self.tags)),
+                self.domain or "",
             ]
         )
         return sha256(payload.encode("utf-8")).hexdigest()[:16]
@@ -340,14 +354,24 @@ class TransactionEvent(Strict):
 
 
 class WritebackReceipt(Strict):
-    """Evidence of one reversible DataHub writeback, including its restoration."""
+    """Evidence of one reversible DataHub writeback, including its restoration.
+
+    ``verified`` and ``restored`` are tracked independently and neither implies the other: a
+    write can land and be confirmed while its restoration fails, and a write can fail while the
+    entity is confirmed untouched. Collapsing them would hide which of the two actually happened.
+    """
 
     entity_urn: str
     aspect: str
+    operation: str = ""
     previous_value: str | None
     written_value: str
     reread_value: str | None
+    #: The write landed and an immediate re-read returned exactly the written value.
     verified: bool
+    #: A restoration was attempted, regardless of whether it succeeded.
+    restoration_attempted: bool = False
+    #: A re-read after restoration returned the captured original value.
     restored: bool
     restored_value: str | None = None
     written_at: datetime

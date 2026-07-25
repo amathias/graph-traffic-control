@@ -24,15 +24,17 @@ def allocated(seeded_settings) -> list[str]:
     return manifest["entities"]
 
 
+PROJECT_TAG_URN = "urn:li:tag:project-graph-traffic-control"
+DOMAIN_URN = "urn:li:domain:graph-traffic-control"
+
+
 @pytest.fixture
 def live_state(allocated) -> FakeMcpState:
     state = FakeMcpState()
-    state.entities["urn:li:tag:project-graph-traffic-control"] = {
-        "urn": "urn:li:tag:project-graph-traffic-control",
-        "name": "project-graph-traffic-control",
-    }
+    state.add_entity(PROJECT_TAG_URN, name="project-graph-traffic-control")
+    state.add_entity(DOMAIN_URN, name="Demo / Graph Traffic Control")
     for urn in allocated:
-        state.entities[urn] = {"urn": urn, "name": urn}
+        state.add_entity(urn, name=urn)
     return state
 
 
@@ -112,7 +114,8 @@ class TestLiveMode:
         assert check["ok"] is True
         assert check["status"] == "verified"
         assert check["tag_verified"] == "project-graph-traffic-control"
-        assert check["allocated_entities_found"] == check["allocated_entities_probed"]
+        assert check["domain_verified"] == DOMAIN_URN
+        assert check["allocated_entities_found"] == check["allocated_entities_expected"]
 
     def test_missing_read_tool_fails_closed(
         self, seeded_settings, namespace, allocated, live_state
@@ -173,6 +176,39 @@ class TestLiveMode:
             )
         assert check["ok"] is False
         assert check["status"] == "entities_missing"
+
+    def test_a_partially_ingested_catalogue_is_not_ready(
+        self, seeded_settings, namespace, allocated, live_state
+    ):
+        """The complete allocation is required. Sampling would pass a half-ingested catalogue,
+        and a partial graph reports fewer conflicts than really exist."""
+        dropped = sorted(allocated)[-1]
+        live_state.entities.pop(dropped)
+        with FakeMcpServer(live_state) as server:
+            check = readiness.check_datahub(
+                _live_settings(seeded_settings, server.url),
+                namespace,
+                allocated,
+                _factory(server.url),
+            )
+        assert check["ok"] is False
+        assert check["status"] == "entities_missing"
+        assert check["missing"] == [dropped]
+        assert check["allocated_entities_expected"] == len(set(allocated))
+
+    def test_missing_domain_fails_closed(
+        self, seeded_settings, namespace, allocated, live_state
+    ):
+        live_state.entities.pop(DOMAIN_URN)
+        with FakeMcpServer(live_state) as server:
+            check = readiness.check_datahub(
+                _live_settings(seeded_settings, server.url),
+                namespace,
+                allocated,
+                _factory(server.url),
+            )
+        assert check["ok"] is False
+        assert check["status"] == "domain_missing"
 
     def test_unreachable_endpoint_fails_closed(self, seeded_settings, namespace, allocated):
         settings = _live_settings(seeded_settings, "http://127.0.0.1:1/mcp")

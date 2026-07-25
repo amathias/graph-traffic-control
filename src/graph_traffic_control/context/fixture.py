@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 from graph_traffic_control.context.namespace import Namespace
+from graph_traffic_control.context.provider import ContextReadError
 from graph_traffic_control.domain.clock import Clock, SystemClock
 from graph_traffic_control.domain.models import (
     Criticality,
@@ -39,8 +40,13 @@ class FixtureContextProvider:
 
     def snapshot(self) -> GraphSnapshot:
         if not self._path.is_file():
-            raise FileNotFoundError(f"Fixture graph not found: {self._path}")
-        payload = json.loads(self._path.read_text(encoding="utf-8"))
+            raise ContextReadError(f"Fixture graph not found: {self._path}")
+        try:
+            payload = json.loads(self._path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ContextReadError(f"Fixture graph is not valid JSON: {exc}") from None
+        if not isinstance(payload, dict):
+            raise ContextReadError("Fixture graph must be a JSON object.")
 
         entities: dict[str, EntityContext] = {}
         for raw in [*payload.get("datasets", []), *payload.get("dashboards", [])]:
@@ -51,10 +57,18 @@ class FixtureContextProvider:
                 description=raw.get("description"),
                 criticality=Criticality(raw.get("criticality", "UNKNOWN")),
                 owners=list(raw.get("owners", [])),
+                tags=sorted(set(raw.get("tags", []))),
+                domain=raw.get("domain"),
                 fields=[
                     SchemaField(path=f["path"], type=f.get("type", "unknown"))
                     for f in raw.get("fields", [])
                 ],
+            )
+
+        if not entities:
+            raise ContextReadError(
+                f"Fixture graph {self._path} contains no entities. Refusing to hand the "
+                "coordinator an empty graph, which would falsely report no conflicts."
             )
 
         edges: list[LineageEdge] = []

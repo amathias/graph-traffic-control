@@ -32,11 +32,12 @@ from graph_traffic_control.conflict.engine import (
 )
 from graph_traffic_control.conflict.lineage import DEFAULT_MAX_DEPTH, expand_impact
 from graph_traffic_control.context.namespace import Namespace, NamespaceViolation
-from graph_traffic_control.context.provider import ContextProvider
+from graph_traffic_control.context.provider import ContextProvider, ContextReadError
 from graph_traffic_control.domain.clock import Clock
 from graph_traffic_control.domain.models import (
     ChangeProposal,
     Conflict,
+    Criticality,
     GraphSnapshot,
     ImpactSet,
     Lease,
@@ -52,6 +53,17 @@ from graph_traffic_control.txn.store import TransactionStore
 
 COORDINATOR_ACTOR = "coordinator"
 PREPARE_TOKEN_TTL_SECONDS = 300
+
+#: Reported when preparation aborts before any impact could be computed. Deliberately empty
+#: rather than fabricated: no graph was readable, so nothing is known about the blast radius.
+EMPTY_IMPACT = ImpactSet(
+    declared_reads=[],
+    declared_writes=[],
+    expanded_downstream=[],
+    expanded_upstream=[],
+    blast_radius=0,
+    max_criticality=Criticality.UNKNOWN,
+)
 
 
 class CoordinatorError(RuntimeError):
@@ -218,7 +230,24 @@ class Coordinator:
 
         self._transition(proposal, TransactionState.ANALYZING, detail="analyzing")
 
-        snapshot = self._provider.snapshot()
+        # A graph the coordinator cannot read is not a graph with no conflicts. Abort rather
+        # than analyse against a partial or empty snapshot.
+        try:
+            snapshot = self._provider.snapshot()
+        except ContextReadError as exc:
+            reason = f"Graph context unavailable: {exc}"
+            self._transition(
+                proposal,
+                TransactionState.ABORTED,
+                detail=reason,
+                evidence={"fail_closed": "context_read"},
+            )
+            return PrepareOutcome(
+                proposal_id=proposal.proposal_id,
+                state=TransactionState.ABORTED,
+                impact=EMPTY_IMPACT,
+                reason=reason,
+            )
 
         # Row 7: stale expected versions abort preparation.
         stale = self._stale_urns(proposal, snapshot)
@@ -383,8 +412,16 @@ class Coordinator:
                 "High-blast-radius change requires approval, which was not granted",
             )
 
-        # Re-read the graph immediately before commit and fail closed on drift.
-        fresh = self._provider.snapshot()
+        # Re-read the graph immediately before commit and fail closed on drift. A failed re-read
+        # is itself fail-closed: without it there is no way to know the graph has not drifted.
+        try:
+            fresh = self._provider.snapshot()
+        except ContextReadError as exc:
+            return self._abort(
+                proposal,
+                f"Pre-commit graph re-read failed: {exc}",
+                evidence={"fail_closed": "context_read"},
+            )
         commit_fingerprint = fresh.subgraph_fingerprint(stored.guarded_urns)
         if commit_fingerprint != stored.subgraph_fingerprint:
             outcome = self._abort(

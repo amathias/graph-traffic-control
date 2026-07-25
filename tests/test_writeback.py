@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from graph_traffic_control.context.mcp_client import McpClient
+from graph_traffic_control.context.mcp_client import McpClient, McpError
 from graph_traffic_control.context.namespace import Namespace, NamespaceViolation
 from graph_traffic_control.demo.agents import FCT_REVENUE
 from graph_traffic_control.domain.clock import ManualClock
@@ -32,11 +32,9 @@ ORIGINAL_DESCRIPTION = "Revenue fact table."
 @pytest.fixture
 def state() -> FakeMcpState:
     state = FakeMcpState()
-    state.entities[FCT_REVENUE] = {
-        "urn": FCT_REVENUE,
-        "name": "traffic.fct_revenue",
-        "description": ORIGINAL_DESCRIPTION,
-    }
+    state.add_entity(
+        FCT_REVENUE, name="traffic.fct_revenue", description=ORIGINAL_DESCRIPTION
+    )
     return state
 
 
@@ -59,8 +57,23 @@ class TestHappyPath:
     def test_original_value_is_restored(self, writeback, state):
         receipt = writeback.apply(FCT_REVENUE, "committed prop-a")
         assert receipt.restored is True
+        assert receipt.restoration_attempted is True
         assert receipt.restored_value == ORIGINAL_DESCRIPTION
-        assert state.entities[FCT_REVENUE]["description"] == ORIGINAL_DESCRIPTION
+        assert state.description_of(FCT_REVENUE) == ORIGINAL_DESCRIPTION
+
+    def test_write_uses_the_coordinator_observed_argument_contract(self, writeback, state):
+        writeback.apply(FCT_REVENUE, "committed prop-a")
+        writes = [args for name, args in state.calls if name == "update_description"]
+        assert writes[0] == {
+            "entity_urn": FCT_REVENUE,
+            "description": "committed prop-a",
+            "operation": writeback.operation,
+        }
+        assert "urn" not in writes[0], "entity_urn is the contract; 'urn' was the wrong guess"
+
+    def test_the_operation_used_is_recorded_on_the_receipt(self, writeback):
+        receipt = writeback.apply(FCT_REVENUE, "note")
+        assert receipt.operation == writeback.operation
 
     def test_call_sequence_is_capture_write_reread_restore(self, writeback, state):
         writeback.apply(FCT_REVENUE, "committed prop-a")
@@ -87,9 +100,29 @@ class TestFailureHandling:
             client.close()
 
         assert receipt.verified is False
+        assert receipt.restoration_attempted is True
         assert "Writeback failed" in receipt.detail
         # The description was never changed, so the instance is still as found.
-        assert state.entities[FCT_REVENUE]["description"] == ORIGINAL_DESCRIPTION
+        assert state.description_of(FCT_REVENUE) == ORIGINAL_DESCRIPTION
+
+    def test_verification_and_restoration_are_tracked_independently(self, state):
+        """A verified write whose restoration failed must report exactly that, not one flag."""
+
+        class RestoreFails(ReversibleDescriptionWriteback):
+            def _write_description(self, urn: str, description: str) -> None:
+                if description == ORIGINAL_DESCRIPTION:
+                    raise McpError("restore rejected")
+                super()._write_description(urn, description)
+
+        with FakeMcpServer(state) as server:
+            client = McpClient(server.url, TOKEN)
+            receipt = RestoreFails(client, NAMESPACE, ManualClock()).apply(FCT_REVENUE, "note")
+            client.close()
+
+        assert receipt.verified is True, "the write did land and was re-read"
+        assert receipt.restoration_attempted is True
+        assert receipt.restored is False, "restoration failed and must not be reported as done"
+        assert "Restoration failed" in receipt.detail
 
     def test_unreadable_entity_raises_before_any_write(self, state):
         state.fail_tools.add("get_entities")
@@ -102,7 +135,7 @@ class TestFailureHandling:
         assert "update_description" not in {name for name, _ in state.calls}
 
     def test_entity_with_no_previous_description_restores_to_empty(self, state):
-        state.entities[FCT_REVENUE] = {"urn": FCT_REVENUE, "name": "traffic.fct_revenue"}
+        state.add_entity(FCT_REVENUE, name="traffic.fct_revenue")
         with FakeMcpServer(state) as server:
             client = McpClient(server.url, TOKEN)
             writeback = ReversibleDescriptionWriteback(client, NAMESPACE, ManualClock())

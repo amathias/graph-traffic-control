@@ -32,7 +32,7 @@ from graph_traffic_control.context.datahub import DataHubContextProvider
 from graph_traffic_control.context.fixture import FixtureContextProvider
 from graph_traffic_control.context.mcp_client import McpClient
 from graph_traffic_control.context.namespace import Namespace, NamespaceViolation
-from graph_traffic_control.context.provider import ContextProvider
+from graph_traffic_control.context.provider import ContextProvider, ContextReadError
 from graph_traffic_control.demo.seed import ARTIFACT_BY_URN, load_manifest
 from graph_traffic_control.domain.clock import SystemClock
 from graph_traffic_control.domain.models import ChangeProposal
@@ -89,7 +89,12 @@ class Runtime:
         if not self.settings.live_mode:
             return None
         client = McpClient(self.settings.datahub_mcp_url, self.settings.datahub_token)
-        return ReversibleDescriptionWriteback(client, self.namespace, self.clock)
+        return ReversibleDescriptionWriteback(
+            client,
+            self.namespace,
+            self.clock,
+            operation=self.settings.datahub_description_operation,
+        )
 
     def close(self) -> None:
         self.store.close()
@@ -147,7 +152,12 @@ def readiness(settings: SettingsDep) -> JSONResponse:
 
 @app.get("/api/graph")
 def graph(runtime: RuntimeDep) -> dict[str, Any]:
-    snapshot = runtime.provider.snapshot()
+    # 503, never an empty graph: a caller that cannot tell "unreadable" from "no dependencies"
+    # would draw exactly the wrong conclusion.
+    try:
+        snapshot = runtime.provider.snapshot()
+    except ContextReadError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
     return {
         "source": runtime.provider.source,
         "fingerprint": snapshot.fingerprint(),

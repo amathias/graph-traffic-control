@@ -1,9 +1,14 @@
 """One reversible, namespace-scoped DataHub writeback.
 
 The coordinator's integration rulings permit tag, description, and structured-property
-proposals, but only after a smoke test against pinned DataHub Core v1.6.0 confirms the selected
-aspect. This module therefore uses ``update_description``: the most widely supported mutable
-aspect, and one whose previous value can be captured and restored exactly.
+proposals. This module uses ``update_description``: the most widely supported mutable aspect, and
+one whose previous value can be captured and restored exactly.
+
+Tool contract (coordinator-observed)
+------------------------------------
+``update_description`` takes ``entity_urn``, ``description``, and ``operation``. The capture and
+re-read legs use ``get_entities`` with ``urns``, reading ``structuredContent.result``, and the
+description is nested under the entity's ``properties``.
 
 The sequence is deliberately conservative:
 
@@ -14,22 +19,33 @@ The sequence is deliberately conservative:
 4. **Restore** the captured value.
 
 Restoration runs in a ``finally`` block: if verification fails, the original value is still put
-back. A writeback that cannot be restored is reported as unrestored in the receipt rather than
-being silently left in place.
+back. Each leg is tracked **independently** on the receipt — a write can be verified while its
+restoration failed, and the receipt must say so rather than collapsing both into one flag.
 
 Every target URN passes the namespace guard first, so this can never write to another
-submission's entity.
+submission's entity. Every failure raises or is recorded; nothing is swallowed.
 """
 
 from __future__ import annotations
 
-from graph_traffic_control.context.datahub import TOOL_UPDATE_DESCRIPTION, extract_description
+from graph_traffic_control.context.datahub import (
+    TOOL_GET_ENTITIES,
+    TOOL_UPDATE_DESCRIPTION,
+    entities_from_result,
+    extract_description,
+)
 from graph_traffic_control.context.mcp_client import McpClient, McpError
 from graph_traffic_control.context.namespace import Namespace
 from graph_traffic_control.domain.clock import Clock, SystemClock
 from graph_traffic_control.domain.models import WritebackReceipt
 
-TOOL_GET_ENTITIES = "get_entities"
+#: ``update_description`` requires an ``operation``. ``SET`` is the replace-in-place semantic the
+#: capture/write/re-read/restore cycle depends on: an append-style operation could not restore the
+#: original value exactly. The value is settings-driven (``DATAHUB_DESCRIPTION_OPERATION``) so the
+#: coordinator can correct it on the host without a code change if the pinned server names it
+#: differently. See docs/LIMITATIONS.md — the argument *names* are coordinator-observed, this
+#: particular *value* is not.
+DEFAULT_DESCRIPTION_OPERATION = "SET"
 
 
 class WritebackError(RuntimeError):
@@ -46,32 +62,38 @@ class ReversibleDescriptionWriteback:
         client: McpClient,
         namespace: Namespace,
         clock: Clock | None = None,
+        operation: str = DEFAULT_DESCRIPTION_OPERATION,
     ) -> None:
         self._client = client
         self._namespace = namespace
         self._clock = clock or SystemClock()
+        self._operation = operation
+
+    @property
+    def operation(self) -> str:
+        return self._operation
 
     def _read_description(self, urn: str) -> str | None:
-        payload = self._client.call_tool(TOOL_GET_ENTITIES, {"urns": [urn]})
-        candidates = payload if isinstance(payload, list) else [payload]
-        for candidate in candidates:
-            if isinstance(candidate, dict) and candidate.get("urn") == urn:
-                return extract_description(candidate)
-        for candidate in candidates:
-            if isinstance(candidate, dict):
-                return extract_description(candidate)
-        return None
+        payload = self._client.call_tool_structured(TOOL_GET_ENTITIES, {"urns": [urn]})
+        entity = entities_from_result(payload, [urn])[urn]
+        return extract_description(entity)
 
     def _write_description(self, urn: str, description: str) -> None:
-        self._client.call_tool(
-            TOOL_UPDATE_DESCRIPTION, {"urn": urn, "description": description}
+        self._client.call_tool_structured(
+            TOOL_UPDATE_DESCRIPTION,
+            {
+                "entity_urn": urn,
+                "description": description,
+                "operation": self._operation,
+            },
         )
 
     def apply(self, urn: str, outcome_note: str) -> WritebackReceipt:
         """Perform the capture/write/re-read/restore cycle and return a receipt.
 
-        The receipt records what was actually observed. ``verified`` is only true when the
-        re-read returned the written value.
+        The receipt records what was actually observed. ``verified`` is true only when the
+        re-read returned the written value; ``restored`` is true only when a further re-read
+        confirmed the original value is back. They are independent: neither implies the other.
         """
         self._namespace.require(urn, operation="DataHub writeback")
 
@@ -84,6 +106,7 @@ class ReversibleDescriptionWriteback:
         reread: str | None = None
         verified = False
         restored = False
+        restoration_attempted = False
         restored_value: str | None = None
         detail = ""
 
@@ -97,6 +120,7 @@ class ReversibleDescriptionWriteback:
             detail = f"Writeback failed: {exc}"
         finally:
             # Restore even when verification failed, so the shared instance is left as found.
+            restoration_attempted = True
             try:
                 self._write_description(urn, previous or "")
                 restored_value = self._read_description(urn)
@@ -110,10 +134,12 @@ class ReversibleDescriptionWriteback:
         return WritebackReceipt(
             entity_urn=urn,
             aspect=self.aspect,
+            operation=self._operation,
             previous_value=previous,
             written_value=outcome_note,
             reread_value=reread,
             verified=verified,
+            restoration_attempted=restoration_attempted,
             restored=restored,
             restored_value=restored_value,
             written_at=written_at,

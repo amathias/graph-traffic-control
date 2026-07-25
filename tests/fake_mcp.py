@@ -1,12 +1,23 @@
-"""A fake MCP server, served over real HTTP on localhost.
+"""A fake DataHub MCP server, served over real HTTP on localhost.
 
 Exercising the client through an actual socket rather than a mocked transport is deliberate: it
 proves the JSON-RPC framing, the ``Mcp-Session-Id`` handling, the SSE branch, and the auth header
 all work end to end. It touches no AWS resource and no shared DataHub instance.
 
-This is a **test double**, not evidence of live DataHub behaviour. It encodes the tool names and
-response shapes this project expects; it cannot confirm that a real ``mcp-server-datahub`` 0.6.0
-matches them.
+**This is a protocol double. Every result produced with it is simulated, not live DataHub
+evidence.** What it *can* prove is that this project speaks the contract it claims to speak,
+because the double is strict rather than permissive:
+
+- each tool validates its argument names against the coordinator-observed contract and returns a
+  JSON-RPC error if the client sends anything else, so an argument-name regression fails a test
+  instead of silently "working";
+- payloads are emitted in the coordinator-observed envelopes
+  (``structuredContent.result``, ``structuredContent.downstreams.searchResults[*].entity.urn``,
+  ``structuredContent.fields``) with governance nested under ``properties``, ``ownership``,
+  ``tags``, and ``domain``.
+
+It still cannot confirm that the pinned ``mcp-server-datahub`` behaves this way; only a live run
+can. See ``docs/LIMITATIONS.md``.
 """
 
 from __future__ import annotations
@@ -26,6 +37,42 @@ DEFAULT_TOOLS = [
     "add_tags",
 ]
 
+#: Coordinator-observed argument contracts. The double refuses anything else.
+REQUIRED_ARGUMENTS: dict[str, set[str]] = {
+    "get_entities": {"urns"},
+    "get_lineage": {"urn", "upstream", "max_hops", "max_results"},
+    "list_schema_fields": {"urn", "limit"},
+    "update_description": {"entity_urn", "description", "operation"},
+}
+
+
+class ContractViolation(Exception):
+    """The client called a tool with arguments the real server would not accept."""
+
+
+def entity_payload(
+    urn: str,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    owners: list[str] | None = None,
+    tags: list[str] | None = None,
+    domain: str | None = None,
+) -> dict[str, Any]:
+    """Build an entity in the nested governance shape the real server returns."""
+    payload: dict[str, Any] = {"urn": urn, "properties": {}}
+    if name is not None:
+        payload["properties"]["name"] = name
+    if description is not None:
+        payload["properties"]["description"] = description
+    if owners is not None:
+        payload["ownership"] = {"owners": [{"owner": owner} for owner in owners]}
+    if tags is not None:
+        payload["tags"] = {"tags": [{"tag": tag} for tag in tags]}
+    if domain is not None:
+        payload["domain"] = {"domain": domain}
+    return payload
+
 
 class FakeMcpState:
     """Mutable server state a test can inspect and steer."""
@@ -40,13 +87,24 @@ class FakeMcpState:
         self.respond_with_sse = False
         self.fail_tools: set[str] = set()
         self.reject_unauthenticated = False
+        #: Tools that answer 200 with a payload in a shape this project does not accept, so the
+        #: fail-closed behaviour can be tested against a real response rather than a mock.
+        self.malformed_tools: dict[str, Any] = {}
         #: When true, respond 500 with the received Authorization header echoed into the body.
         #: Simulates a badly-behaved upstream that reflects credentials in an error, so the
         #: client's redaction can be tested against a real response.
         self.leak_auth_in_error = False
 
+    def add_entity(self, urn: str, **kwargs: Any) -> dict[str, Any]:
+        self.entities[urn] = entity_payload(urn, **kwargs)
+        return self.entities[urn]
+
+    def description_of(self, urn: str) -> str | None:
+        entity = self.entities.get(urn, {})
+        return entity.get("properties", {}).get("description")
+
     def descriptions(self) -> dict[str, str | None]:
-        return {urn: entity.get("description") for urn, entity in self.entities.items()}
+        return {urn: self.description_of(urn) for urn in self.entities}
 
 
 def _handler_factory(state: FakeMcpState):
@@ -151,13 +209,25 @@ def _handler_factory(state: FakeMcpState):
                     )
                     return
 
-                payload = _dispatch(state, name, arguments)
+                try:
+                    payload = _dispatch(state, name, arguments)
+                except ContractViolation as exc:
+                    self._send(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": request_id,
+                            "error": {"code": -32602, "message": str(exc)},
+                        }
+                    )
+                    return
+
                 self._send(
                     {
                         "jsonrpc": "2.0",
                         "id": request_id,
                         "result": {
                             "content": [{"type": "text", "text": json.dumps(payload)}],
+                            "structuredContent": payload,
                             "isError": False,
                         },
                     }
@@ -175,25 +245,63 @@ def _handler_factory(state: FakeMcpState):
     return Handler
 
 
+def _require_arguments(name: str, arguments: dict[str, Any]) -> None:
+    """Reject any call that does not match the coordinator-observed argument contract."""
+    expected = REQUIRED_ARGUMENTS.get(name)
+    if expected is None:
+        return
+    received = set(arguments)
+    if missing := sorted(expected - received):
+        raise ContractViolation(
+            f"{name} requires argument(s) {missing}; received {sorted(received)}."
+        )
+    if unexpected := sorted(received - expected):
+        raise ContractViolation(
+            f"{name} does not accept argument(s) {unexpected}; contract is {sorted(expected)}."
+        )
+
+
 def _dispatch(state: FakeMcpState, name: str, arguments: dict[str, Any]) -> Any:
+    if name in state.malformed_tools:
+        return state.malformed_tools[name]
+
+    _require_arguments(name, arguments)
+
     if name == "get_entities":
-        urns = arguments.get("urns") or [arguments.get("urn")]
-        return [state.entities[urn] for urn in urns if urn in state.entities]
+        urns = arguments["urns"]
+        if not isinstance(urns, list):
+            raise ContractViolation("get_entities 'urns' must be a list.")
+        return {"result": [state.entities[urn] for urn in urns if urn in state.entities]}
+
     if name == "list_schema_fields":
-        return state.schema_fields.get(arguments.get("urn", ""), [])
+        return {"fields": list(state.schema_fields.get(arguments["urn"], []))}
+
     if name == "get_lineage":
-        return [{"urn": urn} for urn in state.lineage.get(arguments.get("urn", ""), [])]
+        urn = arguments["urn"]
+        upstream = arguments["upstream"]
+        if upstream:
+            related = [u for u, downs in state.lineage.items() if urn in downs]
+            key = "upstreams"
+        else:
+            related = list(state.lineage.get(urn, []))
+            key = "downstreams"
+        limited = related[: int(arguments["max_results"])]
+        return {key: {"searchResults": [{"entity": {"urn": u}} for u in limited]}}
+
     if name == "update_description":
-        urn = arguments.get("urn", "")
+        urn = arguments["entity_urn"]
+        operation = arguments["operation"]
         if urn in state.entities:
-            state.entities[urn] = {
-                **state.entities[urn],
-                "description": arguments.get("description"),
-            }
-        return {"status": "ok", "urn": urn}
+            entity = state.entities[urn]
+            properties = dict(entity.get("properties", {}))
+            properties["description"] = arguments["description"]
+            state.entities[urn] = {**entity, "properties": properties}
+        return {"result": {"status": "ok", "urn": urn, "operation": operation}}
+
     if name == "add_tags":
-        return {"status": "ok"}
-    return {}
+        return {"result": {"status": "ok"}}
+
+    return {"result": {}}
 
 
 class FakeMcpServer:

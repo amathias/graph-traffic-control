@@ -31,6 +31,15 @@ class McpError(RuntimeError):
     """An MCP transport or protocol failure, with any secret material removed."""
 
 
+class McpContractError(McpError):
+    """The server answered, but not in the shape this project's contract requires.
+
+    Raised rather than tolerated. An unrecognised payload means the coordinator cannot know what
+    the graph looks like, and a coordinator that guesses would issue conflict and commit decisions
+    from fabricated context. Fail closed instead.
+    """
+
+
 def _redact(text: str, secret: str | None) -> str:
     if secret and secret in text:
         text = text.replace(secret, "***redacted***")
@@ -183,17 +192,39 @@ class McpClient:
         tools = result.get("tools", [])
         return [tool["name"] for tool in tools if isinstance(tool, dict) and "name" in tool]
 
-    def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
-        """Invoke a tool and return its decoded payload.
+    def call_tool_structured(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Invoke a tool and require a ``structuredContent`` object in the response.
 
-        MCP returns tool output as a content list. DataHub's tools return JSON in a text block,
-        so a text payload that parses as JSON is decoded; otherwise the raw text is returned.
+        The DataHub MCP tools this project depends on return their payload under
+        ``structuredContent`` (see :mod:`graph_traffic_control.context.datahub` for the exact
+        per-tool contract). A response without it is a contract violation, not something to
+        fall back from: falling back to loose text parsing is how a shape mismatch turns into a
+        silently wrong graph.
         """
+        payload = self._call_tool_result(name, arguments)
+        structured = payload.get("structuredContent")
+        if not isinstance(structured, dict):
+            raise McpContractError(
+                f"MCP tool {name} returned no structuredContent object "
+                f"(got {type(structured).__name__}). This project requires the structured "
+                "response contract and will not guess at an alternative shape."
+            )
+        return structured
+
+    def _call_tool_result(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         self.initialize()
         result = self._rpc("tools/call", {"name": name, "arguments": arguments})
-
         if result.get("isError"):
             raise McpError(f"MCP tool {name} reported an error: {result.get('content')}")
+        return result
+
+    def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        """Invoke a tool and return its decoded payload, structured or textual.
+
+        Used for probes that only need to know a call succeeded. Every read whose *content* the
+        coordinator depends on must use :meth:`call_tool_structured` instead.
+        """
+        result = self._call_tool_result(name, arguments)
 
         if "structuredContent" in result:
             return result["structuredContent"]

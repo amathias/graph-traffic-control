@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from graph_traffic_control.context.namespace import NamespaceViolation
+from graph_traffic_control.context.provider import ContextReadError
 from graph_traffic_control.demo.agents import (
     FCT_REVENUE,
     METRIC_NET_REVENUE,
@@ -18,13 +19,27 @@ from graph_traffic_control.demo.agents import (
     proposal_c,
     proposal_d,
 )
+from graph_traffic_control.demo.seed import ARTIFACT_BY_URN
 from graph_traffic_control.domain.models import (
     AgentIdentity,
     ChangeAction,
     ChangeProposal,
     TransactionState,
 )
-from graph_traffic_control.txn.coordinator import CoordinatorError
+from graph_traffic_control.txn.coordinator import Coordinator, CoordinatorError
+
+
+class _BrokenProvider:
+    """A provider whose read always fails, as a live DataHub outage would."""
+
+    source = "datahub-mcp"
+
+    def snapshot(self):
+        raise ContextReadError("Could not read downstream lineage: MCP get_lineage error")
+
+
+def _raise_context_error():
+    raise ContextReadError("graph became unreadable")
 
 
 def _approve_and_commit(coordinator, proposal, outcome, writeback=None):
@@ -321,3 +336,76 @@ class TestAuditTrail:
             e for e in store.list_events(c.proposal_id) if e.to_state is TransactionState.COMMITTED
         ][0]
         assert committed.evidence["context_source"] == "fixture"
+
+
+class TestFailsClosedOnUnreadableContext:
+    """A graph the coordinator cannot read is not a graph with no conflicts.
+
+    The rejected candidate degraded a context read failure into an empty graph, which reads as
+    "nothing conflicts, commit away". Both the prepare and the pre-commit re-read must abort.
+    """
+
+    def test_prepare_aborts_when_the_graph_cannot_be_read(
+        self, store, namespace, clock, executor, versions
+    ):
+        coordinator = Coordinator(
+            store=store,
+            provider=_BrokenProvider(),
+            namespace=namespace,
+            clock=clock,
+            executor=executor,
+            downstream_artifacts=ARTIFACT_BY_URN,
+        )
+        outcome = coordinator.prepare(proposal_c(versions))
+        assert outcome.state is TransactionState.ABORTED
+        assert "Graph context unavailable" in outcome.reason
+        assert outcome.impact.blast_radius == 0
+        assert not outcome.conflicts, "no conflict may be asserted from a graph never read"
+
+    def test_prepare_failure_is_audited_as_fail_closed(
+        self, store, namespace, clock, executor, versions
+    ):
+        coordinator = Coordinator(
+            store=store,
+            provider=_BrokenProvider(),
+            namespace=namespace,
+            clock=clock,
+            executor=executor,
+            downstream_artifacts=ARTIFACT_BY_URN,
+        )
+        c = proposal_c(versions)
+        coordinator.prepare(c)
+        aborted = [
+            e for e in store.list_events(c.proposal_id) if e.to_state is TransactionState.ABORTED
+        ][0]
+        assert aborted.evidence["fail_closed"] == "context_read"
+
+    def test_precommit_reread_failure_aborts_instead_of_committing(
+        self, coordinator, provider, versions
+    ):
+        c = proposal_c(versions)
+        outcome = coordinator.prepare(c)
+        assert outcome.prepared
+
+        # The graph became unreadable between prepare and commit.
+        provider.snapshot = _raise_context_error
+        commit = _approve_and_commit(coordinator, c, outcome)
+
+        assert commit.state is TransactionState.ABORTED
+        assert "Pre-commit graph re-read failed" in commit.reason
+
+    def test_an_unreadable_graph_never_produces_a_committed_proposal(
+        self, store, namespace, clock, executor, versions
+    ):
+        coordinator = Coordinator(
+            store=store,
+            provider=_BrokenProvider(),
+            namespace=namespace,
+            clock=clock,
+            executor=executor,
+            downstream_artifacts=ARTIFACT_BY_URN,
+        )
+        c = proposal_c(versions)
+        coordinator.prepare(c)
+        states = {state for _, state in store.list_proposals()}
+        assert TransactionState.COMMITTED not in states
