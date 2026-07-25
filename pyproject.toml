@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "graph-traffic-control"
+version = "0.1.0"
+description = "Transactional coordination for autonomous data agents, powered by DataHub lineage"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+dependencies = [
+  "fastapi>=0.115,<1",
+  "networkx>=3.4,<4",
+  "pydantic>=2.10,<3",
+  "pydantic-settings>=2.7,<3",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[project.optional-dependencies]
+datahub = [
+  "acryl-datahub>=1.1,<2",
+  "mcp>=1.9,<2",
+]
+dev = [
+  "httpx>=0.28,<1",
+  "pytest>=8.3,<9",
+  "pytest-cov>=6,<8",
+  "ruff>=0.9,<1",
+]
+
+[project.scripts]
+gtc-api = "graph_traffic_control.api:run"
+gtc-seed = "graph_traffic_control.demo.seed:main"
+gtc-reset = "graph_traffic_control.demo.reset:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/graph_traffic_control"]
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers"
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

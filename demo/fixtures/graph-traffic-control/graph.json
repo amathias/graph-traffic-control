@@ -1,0 +1,158 @@
+{
+  "description": "Demo lineage graph for Graph Traffic Control. Every entity is inside the 'traffic.' allocation recorded in COORDINATOR_HANDOFF.md. Phase 5 re-records this file from the live shared DataHub instance so tests stay deterministic and offline.",
+  "source": "fixture",
+  "namespace": {
+    "urn_prefix": "traffic.",
+    "domain": "Demo / Graph Traffic Control",
+    "tag": "project-graph-traffic-control",
+    "platform": "duckdb",
+    "env": "PROD"
+  },
+  "datasets": [
+    {
+      "urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.raw_sales_orders,PROD)",
+      "name": "traffic.raw_sales_orders",
+      "description": "Raw sales order headers.",
+      "criticality": "TIER_3",
+      "owners": ["sales-eng"],
+      "fields": [
+        {"path": "order_id", "type": "string"},
+        {"path": "customer_id", "type": "string"},
+        {"path": "order_ts", "type": "timestamp"},
+        {"path": "order_total", "type": "double"}
+      ]
+    },
+    {
+      "urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.raw_sales_line_items,PROD)",
+      "name": "traffic.raw_sales_line_items",
+      "description": "Raw sales order line items.",
+      "criticality": "TIER_3",
+      "owners": ["sales-eng"],
+      "fields": [
+        {"path": "order_id", "type": "string"},
+        {"path": "sku", "type": "string"},
+        {"path": "quantity", "type": "int"},
+        {"path": "unit_price", "type": "double"},
+        {"path": "discount", "type": "double"}
+      ]
+    },
+    {
+      "urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.stg_sales,PROD)",
+      "name": "traffic.stg_sales",
+      "description": "Staged and conformed sales transactions.",
+      "criticality": "TIER_2",
+      "owners": ["sales-eng"],
+      "fields": [
+        {"path": "order_id", "type": "string"},
+        {"path": "customer_id", "type": "string"},
+        {"path": "order_ts", "type": "timestamp"},
+        {"path": "line_amount", "type": "double"},
+        {"path": "discount_amount", "type": "double"}
+      ]
+    },
+    {
+      "urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD)",
+      "name": "traffic.fct_revenue",
+      "description": "Revenue fact table. The column Agent A renames, and the table Agent B reads through.",
+      "criticality": "TIER_1",
+      "owners": ["finance-data"],
+      "fields": [
+        {"path": "order_id", "type": "string"},
+        {"path": "customer_id", "type": "string"},
+        {"path": "recognized_at", "type": "timestamp"},
+        {"path": "gross_revenue", "type": "double"},
+        {"path": "refund_amount", "type": "double"}
+      ]
+    },
+    {
+      "urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.metric_net_revenue,PROD)",
+      "name": "traffic.metric_net_revenue",
+      "description": "Semantic net-revenue metric. Depends on traffic.fct_revenue.gross_revenue.",
+      "criticality": "TIER_1",
+      "owners": ["analytics-eng"],
+      "fields": [
+        {"path": "period", "type": "string"},
+        {"path": "net_revenue", "type": "double"}
+      ]
+    },
+    {
+      "urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.raw_support_tickets,PROD)",
+      "name": "traffic.raw_support_tickets",
+      "description": "Raw customer support tickets. Lineage-disjoint from the revenue branch.",
+      "criticality": "TIER_3",
+      "owners": ["support-eng"],
+      "fields": [
+        {"path": "ticket_id", "type": "string"},
+        {"path": "customer_id", "type": "string"},
+        {"path": "opened_at", "type": "timestamp"},
+        {"path": "closed_at", "type": "timestamp"},
+        {"path": "priority", "type": "string"}
+      ]
+    },
+    {
+      "urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.stg_support,PROD)",
+      "name": "traffic.stg_support",
+      "description": "Staged support tickets.",
+      "criticality": "TIER_3",
+      "owners": ["support-eng"],
+      "fields": [
+        {"path": "ticket_id", "type": "string"},
+        {"path": "customer_id", "type": "string"},
+        {"path": "opened_at", "type": "timestamp"},
+        {"path": "resolution_minutes", "type": "int"},
+        {"path": "priority", "type": "string"}
+      ]
+    },
+    {
+      "urn": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_support_sla,PROD)",
+      "name": "traffic.fct_support_sla",
+      "description": "Support SLA attainment fact. Agent C's write target.",
+      "criticality": "TIER_2",
+      "owners": ["support-eng"],
+      "fields": [
+        {"path": "period", "type": "string"},
+        {"path": "priority", "type": "string"},
+        {"path": "sla_attainment", "type": "double"}
+      ]
+    }
+  ],
+  "dashboards": [
+    {
+      "urn": "urn:li:dashboard:(looker,traffic.dash_exec_revenue)",
+      "name": "traffic.dash_exec_revenue",
+      "description": "Executive revenue dashboard. Downstream blast radius for the revenue branch.",
+      "criticality": "TIER_1",
+      "owners": ["finance-data"]
+    }
+  ],
+  "edges": [
+    {
+      "upstream": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.raw_sales_orders,PROD)",
+      "downstream": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.stg_sales,PROD)"
+    },
+    {
+      "upstream": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.raw_sales_line_items,PROD)",
+      "downstream": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.stg_sales,PROD)"
+    },
+    {
+      "upstream": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.stg_sales,PROD)",
+      "downstream": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD)"
+    },
+    {
+      "upstream": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD)",
+      "downstream": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.metric_net_revenue,PROD)"
+    },
+    {
+      "upstream": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.metric_net_revenue,PROD)",
+      "downstream": "urn:li:dashboard:(looker,traffic.dash_exec_revenue)"
+    },
+    {
+      "upstream": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.raw_support_tickets,PROD)",
+      "downstream": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.stg_support,PROD)"
+    },
+    {
+      "upstream": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.stg_support,PROD)",
+      "downstream": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_support_sla,PROD)"
+    }
+  ]
+}

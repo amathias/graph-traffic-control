@@ -1,0 +1,18 @@
+﻿.env
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+coverage.xml
+.coverage
+
+# Disposable demo state. Recreated by `gtc-seed`, removed by `gtc-reset`.
+demo/state/
+
+# Local assistant settings
+.claude/
+
