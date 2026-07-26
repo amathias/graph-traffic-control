@@ -119,12 +119,27 @@ class TestScenarioPayload:
                 )
 
     def test_one_disagreement_is_reported_once(self, payload):
+        """Both directions of a pair are one disagreement, not two.
+
+        They differ only in which side's write target is recorded as the subject, so keying on
+        the subject would let the duplicate through.
+        """
         for proposal in payload["proposals"]:
             keys = [
-                (c["kind"], c["decision"], c["counterpart"], c["subject_urn"])
-                for c in proposal["conflicts"]
+                (c["kind"], c["decision"], c["counterpart"]) for c in proposal["conflicts"]
             ]
-            assert len(keys) == len(set(keys)), f"{proposal['proposal_id']} double-counts"
+            assert len(keys) == len(set(keys)), (
+                f"{proposal['proposal_id']} reports the same disagreement twice: {keys}"
+            )
+
+    def test_the_subject_shown_is_the_viewing_proposals_own_asset(self, payload):
+        """When a proposal raised the conflict itself, its own write target is the subject."""
+        for proposal in payload["proposals"]:
+            for conflict in proposal["conflicts"]:
+                if conflict["proposal_id"] == proposal["proposal_id"]:
+                    assert conflict["subject_urn"] in (
+                        proposal["write_set"] + proposal["read_set"]
+                    )
 
     def test_an_unrelated_proposal_committed_in_parallel(self, payload):
         by_id = {p["proposal_id"]: p for p in payload["proposals"]}

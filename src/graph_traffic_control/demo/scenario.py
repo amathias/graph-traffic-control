@@ -43,21 +43,33 @@ APPROVER = "release-manager"
 def _presentable_conflicts(proposal_id: str, conflicts: list[Conflict]) -> list[dict[str, Any]]:
     """Serialise a proposal's conflicts from that proposal's point of view.
 
-    The coordinator computes each pair in both directions, so a conflict filed under a proposal
-    may have been raised *by* it or *against* it. Rendering the stored ``other_proposal_id``
-    verbatim therefore shows proposals conflicting with themselves, which reads as a bug on the
-    judge's primary screen. ``counterpart`` is always the other party, and the pair is
-    de-duplicated so one disagreement is reported once rather than twice.
+    The coordinator computes each pair in **both directions**, and both results are filed under
+    the proposal being prepared. Two consequences have to be undone before a judge sees them:
+
+    1. The stored ``other_proposal_id`` is the counterpart only for the forward direction. Shown
+       verbatim, the reverse direction renders as a proposal conflicting with itself.
+    2. The same disagreement appears twice — once per direction — differing only in which side's
+       write target is recorded as the subject. It is one disagreement, not two.
+
+    So ``counterpart`` is always the other party, and de-duplication keys on the **unordered
+    pair** plus kind and decision rather than on the subject. The forward direction is kept in
+    preference, so the subject shown is the viewing proposal's own asset.
+
+    Both directions are still kept in the audit log and in the coordinator's own outcome; this
+    is a presentation concern only.
     """
+    ordered = sorted(conflicts, key=lambda c: c.proposal_id != proposal_id)
+
     presented: list[dict[str, Any]] = []
     seen: set[tuple[str, ...]] = set()
-    for conflict in conflicts:
+    for conflict in ordered:
         counterpart = (
             conflict.other_proposal_id
             if conflict.proposal_id == proposal_id
             else conflict.proposal_id
         )
-        key = (conflict.kind.value, conflict.decision.value, counterpart, conflict.subject_urn)
+        pair = tuple(sorted({conflict.proposal_id, conflict.other_proposal_id}))
+        key = (conflict.kind.value, conflict.decision.value, *pair)
         if key in seen:
             continue
         seen.add(key)
