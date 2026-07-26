@@ -513,7 +513,8 @@ what it means, not the absence of a key:
 | no `searchResults`, `total: n > 0` | **raises** — told there are matches, given none |
 | no `searchResults`, no integer `total` | **raises** — unrecognised |
 
-A boolean `total` raises too: `True == 1` in Python, and a flag is not a count.
+A boolean `total` raises too: `True == 1` in Python, and a flag is not a count. **The first
+implementation of this got that wrong — see ADR-021.**
 
 **2. Readiness verifies the seeded lineage reads back.** This is ADR-004's complete-catalogue rule
 applied to edges, for the identical stated reason — *a partial graph reports fewer conflicts than
@@ -538,3 +539,67 @@ The protocol double could not produce this envelope either, so the suite could n
 the same gap as ADR-018 and ADR-019, third time. `FakeMcpState.facet_only_downstreams` now emits
 it verbatim. The lesson stands: **the double is only worth what it faithfully reproduces, and every
 live observation that contradicts it is a correction to make immediately.**
+
+## ADR-021: Prove the type before comparing the value
+
+**Status:** Accepted
+**Date:** 2026-07-26
+
+ADR-020 stated that a boolean `total` is not a count and must fail closed. The implementation did
+not do that. Coordinator review of `caf03d4` found:
+
+```python
+total = downstreams.get("total")
+if total == 0:          # <-- False == 0 is True
+    return []
+if isinstance(total, int):
+    raise ...
+```
+
+`bool` subclasses `int` and `False == 0`, so a JSON `false` was accepted as "no downstream
+matches" — the exact outcome ADR-020 exists to prevent, in the code ADR-020 shipped.
+
+### Why the tests missed it
+
+The regression covered `True` and not `False`. `True` never reaches the value comparison —
+`True == 0` is false, so it falls to the `isinstance` branch and raises. Only `False` takes the bad
+path. Testing one boolean gave the appearance of covering both, and a passing `True` case is
+actively misleading evidence here.
+
+Both are now parametrised, and the parametrisation is the point rather than tidiness: for this
+class of defect, asserting one member of a pair proves nothing about the other.
+
+### The same bug had a second instance
+
+Re-running the widened regression against the shipped reader showed `total: 0.0` was **also**
+accepted, for the same reason: `0.0 == 0`. It was never reported, because nobody thought to send a
+float. A value-first check does not have one hole; it has as many holes as Python has types that
+compare equal to zero.
+
+### The rule
+
+**Prove the type, then compare the value.** Never the other way round on data that crossed a
+network boundary:
+
+```python
+if isinstance(total, bool) or not isinstance(total, int):
+    raise ...          # bool excluded explicitly, before any comparison
+if total < 0:
+    raise ...          # not a possible count
+if total == 0:
+    return []          # now provably a real integer zero
+raise ...              # positive: matches claimed but withheld
+```
+
+Exactly one value is accepted as empty: integer `0`. `False`, `True`, `0.0`, `"0"`, `None`, `[]`,
+`{}`, and negatives are all refused. Negative totals gained their own refusal — a negative match
+count is malformed, and the previous message would have described it as "reports -1 match(es)",
+which is not a truthful reading of a nonsense value.
+
+### Standing lesson
+
+This is the fourth consecutive defect (ADR-018, 019, 020, 021) at the boundary where external data
+enters, and the third where the test suite's shape was the reason it went unnoticed. The pattern is
+consistent: a check that is *nearly* right passes every test written by whoever wrote the check.
+Widening a regression to the full set of adversarial values — not just the one that failed in
+production — is what turns a fix into a guarantee.

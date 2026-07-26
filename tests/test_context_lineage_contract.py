@@ -236,11 +236,37 @@ class TestTheFacetsOnlyEnvelope:
         with pytest.raises(McpContractError, match="neither 'searchResults' nor an integer"):
             downstream_urns_from_lineage({"downstreams": {"facets": []}})
 
-    def test_a_non_integer_total_is_refused(self):
-        with pytest.raises(McpContractError, match="neither 'searchResults' nor an integer"):
-            downstream_urns_from_lineage({"downstreams": {"total": "0"}})
+    @pytest.mark.parametrize("flag", [False, True])
+    def test_a_boolean_total_is_never_a_count(self, flag):
+        """The one that shipped.
 
-    def test_a_true_total_is_not_mistaken_for_one(self):
-        """`True == 1` in Python; a boolean total is not a count."""
-        with pytest.raises(McpContractError):
-            downstream_urns_from_lineage({"downstreams": {"total": True, "facets": []}})
+        ``bool`` subclasses ``int`` and ``False == 0``, so a value-first ``total == 0`` check read
+        a JSON ``false`` as "no downstream matches" — accepting a flag as a count and turning an
+        unreadable graph into an empty one. ``True`` took a different branch and raised, which is
+        exactly why testing only ``True`` missed it.
+
+        Both are parametrised deliberately: this defect is invisible unless both are asserted.
+        """
+        with pytest.raises(McpContractError, match="A boolean is not a match count"):
+            downstream_urns_from_lineage({"downstreams": {"total": flag, "facets": []}})
+
+    @pytest.mark.parametrize(
+        "total", [0.0, 0.5, "0", None, [], {}, [0]], ids=repr
+    )
+    def test_a_non_integer_total_is_refused(self, total):
+        """Only a real integer is a count. A float is not, however round it looks."""
+        with pytest.raises(McpContractError, match="neither 'searchResults' nor an integer"):
+            downstream_urns_from_lineage({"downstreams": {"total": total, "facets": []}})
+
+    @pytest.mark.parametrize("total", [-1, -7])
+    def test_a_negative_total_is_refused(self, total):
+        """Not a possible match count, so not an answer about edges."""
+        with pytest.raises(McpContractError, match="not a possible"):
+            downstream_urns_from_lineage({"downstreams": {"total": total, "facets": []}})
+
+    def test_only_a_real_integer_zero_is_accepted(self):
+        """The whole allowance, stated once: int 0 and nothing else that compares equal to it."""
+        assert downstream_urns_from_lineage({"downstreams": {"total": 0, "facets": []}}) == []
+        for impostor in (False, 0.0, "0", None):
+            with pytest.raises(McpContractError):
+                downstream_urns_from_lineage({"downstreams": {"total": impostor}})

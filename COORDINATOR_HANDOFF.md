@@ -36,13 +36,13 @@ live EC2 host from this project chat.
 | Field | Current value |
 |---|---|
 | Status | `blocked on infrastructure` |
-| Milestone | Live capture and seed succeeded. Two lineage read contracts fixed. **The remaining live failure is a DataHub graph-index problem, not a code defect: `traffic.fct_revenue` returns zero downstreams for an edge that was successfully seeded.** Readiness correctly refuses to serve. Needs a graph-service reindex — see "The lineage index is empty" below. |
+| Milestone | Live capture and seed succeeded. Lineage read contracts fixed, and the `total` type guard corrected after coordinator review (ADR-021). **The remaining live failure is a DataHub graph-index problem, not a code defect** — confirmed by the coordinator: the graph service was not reindexed after the OpenSearch recovery. Readiness correctly refuses to serve. See "The lineage index is empty" below. |
 | Verified commit/artifact | See "Deployment candidate" below |
 | Build command | `python -m venv .venv && .venv/Scripts/python.exe -m pip install -e ".[dev]"` |
 | DataHub extra | `pip install -e ".[datahub]"` on the host — **pinned exactly** to `acryl-datahub==1.6.0.15` and `mcp==1.28.1` (ADR-017). **Installed in a throwaway local venv this session** to verify the emitter contract against the real library; never pointed at any instance, and no network call was made with it. |
-| Test command | `.venv/Scripts/python.exe -m pytest` — **595 passed, 1 skipped** in 192 s, no network required. The skip is `test_datahub_sdk_pinned.py`, which needs the optional extra. |
-| Test command (with the extra) | `pytest` in a venv that also has `.[datahub]` — **606 passed, 0 skipped**. This is the host configuration. |
-| Coverage | `pytest --cov=graph_traffic_control` — **89%** (2711 statements, 291 missed). `demo/datahub_state.py` is now **96%**: the emitter boundary is executed by tests rather than excluded by a `pragma: no cover`, which is what let the blocker through. The largest gap remains `release/archive.py` at 30%: its end-to-end path builds distributions and creates a virtual environment, so it runs as the `gtc-archive-verify` release command rather than in the suite. |
+| Test command | `.venv/Scripts/python.exe -m pytest` — **605 passed, 1 skipped** in 209 s, no network required. The skip is `test_datahub_sdk_pinned.py`, which needs the optional extra. |
+| Test command (with the extra) | `pytest` in a venv that also has `.[datahub]` — **616 passed, 0 skipped**. This is the host configuration. |
+| Coverage | `pytest --cov=graph_traffic_control` — **89%** (2715 statements, 291 missed). `demo/datahub_state.py` is now **96%**: the emitter boundary is executed by tests rather than excluded by a `pragma: no cover`, which is what let the blocker through. The largest gap remains `release/archive.py` at 30%: its end-to-end path builds distributions and creates a virtual environment, so it runs as the `gtc-archive-verify` release command rather than in the suite. |
 | Lint command | `.venv/Scripts/python.exe -m ruff check .` — clean |
 | Build/archive check | `gtc-archive-verify` — **8/8 pass**, including a clean-environment wheel install |
 | Safety scan | `gtc-safety-scan` — **0 blockers, 0 warnings** across 84 tracked files |
@@ -63,7 +63,7 @@ live EC2 host from this project chat.
 | DataHub ingestion | **Applied live by the coordinator.** All 49 typed operations of plan `cd44112ebd42b7de` were accepted by the shared instance. This build changes no plan — the fingerprint is byte-identical, so **do not seed again**. |
 | DataHub emission | **Verified against the pinned SDK, offline.** All 103 operations across the seed, reset, and both restore plans construct as real typed aspects and serialise to the bytes the emitter would send. No emitter was ever connected. |
 | Blockers | **DataHub's graph/lineage index does not return the seeded lineage.** Entities and aspects were accepted; only the index is behind. A reindex of the graph service is required before this project can serve live — no code change will fix it, and none should. The proposal/writeback leg has not been run live and has no receipt. |
-| Evidence produced | 595 passing tests offline / 606 with the extra; live capture and seed evidence recorded below; `examples/`; sanitized receipts under `APP_STATE_DIR/receipts`; `docs/DECISIONS.md` ADR-001..020; `docs/LIMITATIONS.md`; `docs/SUBMISSION.md`; `docs/DEMO_RUNBOOK.md` |
+| Evidence produced | 605 passing tests offline / 616 with the extra; live capture and seed evidence recorded below; `examples/`; sanitized receipts under `APP_STATE_DIR/receipts`; `docs/DECISIONS.md` ADR-001..021; `docs/LIMITATIONS.md`; `docs/SUBMISSION.md`; `docs/DEMO_RUNBOOK.md` |
 
 ## Deployment candidate
 
@@ -73,7 +73,7 @@ live EC2 host from this project chat.
 | Product candidate | `caf03d4` — full SHA `caf03d45ba83b399c1d101c411a11e090d7408de`. Supersedes `754abcb`. **Deploying it will not make the instance ready** — the remaining failure is a DataHub graph-index problem needing a reindex. Deploy only; do not capture or seed. |
 | Tree state | Clean at that commit; `git status` empty |
 | Pushed to origin | `origin/main` |
-| Verified at that commit | **595 tests pass, 1 skipped** offline and **606 pass, 0 skipped** with the pinned extra, **89% coverage** (2711 statements, 291 missed), `ruff check` clean, `gtc-archive-verify` **8/8** (including a clean-environment wheel install), `gtc-safety-scan` **0 blockers / 0 warnings** across 84 tracked files, four-agent scenario runs end to end, judge workflow reproduces the result below unchanged, health 200, readiness 200 and `/api/graph` 200 seeded (fixture mode) |
+| Verified at that commit | **605 tests pass, 1 skipped** offline and **616 pass, 0 skipped** with the pinned extra, **89% coverage** (2715 statements, 291 missed), `ruff check` clean, `gtc-archive-verify` **8/8** (including a clean-environment wheel install), `gtc-safety-scan` **0 blockers / 0 warnings** across 84 tracked files, four-agent scenario runs end to end, judge workflow reproduces the result below unchanged, health 200, readiness 200 and `/api/graph` 200 seeded (fixture mode) |
 
 ### The seed plan fingerprint has changed
 
@@ -175,11 +175,33 @@ The 503 is the correct behaviour. **Do not deploy a build that reads this as emp
 4. Then the outstanding leg: one proposal through prepare/commit and one reversible writeback,
    keeping the receipt with `verified: true` **and** `restored: true`.
 
-**Open question for the coordinator.** The sanitized `structuredContent` was truncated before
-`total`'s value. The reader is safe either way — `0` is read as empty and any positive value
-raises — but please confirm `total: 0`, and whether the graph service was reindexed after the
-OpenSearch recovery. If it was, the zero result needs investigating on the DataHub side before this
-project can be believed live.
+**Both open questions are now answered by the coordinator, and both confirm the diagnosis.** The
+live `total` was the exact numeric `0`, and **the DataHub graph service was not reindexed after the
+OpenSearch recovery.** So the zero downstream count is fully explained by the unindexed graph
+service, and nothing about the seeded data is in doubt: the entities and their `upstreamLineage`
+aspects are correct and accepted. The remediation below stands unchanged — reindex, do not re-seed.
+
+### Follow-up: the `total` type guard was wrong on first implementation (ADR-021)
+
+Coordinator review of `caf03d4` found that `total == 0` was evaluated *before* the integer check.
+`bool` subclasses `int` and `False == 0`, so a JSON `false` was read as "no downstream matches" —
+precisely the outcome this reader exists to prevent, in the code that introduced the rule. The
+regression covered `True`, which takes a different branch and raised, so the gap was invisible.
+
+Fixed by proving the type before comparing the value. Re-running the widened regression against
+`caf03d4` also showed `total: 0.0` had been accepted, for the same reason (`0.0 == 0`) — a second
+instance of the same defect that had not been reported. Exactly one value is now accepted as empty:
+
+| `total` | Result |
+|---|---|
+| integer `0` | empty |
+| `false`, `true` | **refused** — a flag is not a count |
+| `0.0`, `"0"`, `None`, `[]`, `{}` | **refused** — not an integer |
+| negative | **refused** — not a possible count |
+| positive | **refused** — matches claimed but withheld |
+
+This changes no behaviour for the observed live payload, which carried integer `0` and is still
+read as empty. It closes the path where a differently-typed zero would have been.
 
 ## Live run of `0f400a7`: what happened, and what this build changes
 

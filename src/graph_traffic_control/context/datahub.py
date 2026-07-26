@@ -212,20 +212,37 @@ def downstream_urns_from_lineage(payload: dict[str, Any]) -> list[str]:
         # `searchResults` entirely. `total` is the server's own count of matches, so it — not the
         # absence of a key — decides whether this is an empty answer or a broken one.
         total = downstreams.get("total")
+
+        # Prove the type before comparing the value. `bool` subclasses `int` and `False == 0`, so
+        # a value-first check reads a JSON `false` as "no matches" — accepting a flag as a count
+        # and turning an unreadable graph into an empty one. Both booleans are excluded here, and
+        # every comparison below is on a value already known to be a real integer.
+        if isinstance(total, bool):
+            raise McpContractError(
+                f"{TOOL_GET_LINEAGE} 'downstreams' has neither 'searchResults' nor an integer "
+                f"'total' — got the boolean {total!r}. A boolean is not a match count "
+                f"(keys: {sorted(downstreams)})."
+            )
+        if not isinstance(total, int):
+            raise McpContractError(
+                f"{TOOL_GET_LINEAGE} 'downstreams' has neither 'searchResults' nor an integer "
+                f"'total' — got {total!r} ({type(total).__name__}) "
+                f"(keys: {sorted(downstreams)})."
+            )
+        if total < 0:
+            raise McpContractError(
+                f"{TOOL_GET_LINEAGE} 'downstreams.total' is {total}, which is not a possible "
+                f"match count."
+            )
         if total == 0:
             return []
-        if isinstance(total, int):
-            # It says there are matches and then does not include them. Treating that as "no
-            # edges" would drop real lineage silently, which is the one outcome this reader exists
-            # to prevent.
-            raise McpContractError(
-                f"{TOOL_GET_LINEAGE} reports total={total} downstream match(es) but omitted "
-                f"'searchResults' (keys: {sorted(downstreams)}). Refusing to treat withheld "
-                f"results as an empty edge set."
-            )
+        # It says there are matches and then does not include them. Treating that as "no edges"
+        # would drop real lineage silently, which is the one outcome this reader exists to
+        # prevent.
         raise McpContractError(
-            f"{TOOL_GET_LINEAGE} 'downstreams' has neither 'searchResults' nor an integer "
-            f"'total' (keys: {sorted(downstreams)})."
+            f"{TOOL_GET_LINEAGE} reports total={total} downstream match(es) but omitted "
+            f"'searchResults' (keys: {sorted(downstreams)}). Refusing to treat withheld "
+            f"results as an empty edge set."
         )
     results = downstreams["searchResults"]
     if results is None:
