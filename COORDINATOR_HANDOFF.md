@@ -70,7 +70,7 @@ live EC2 host from this project chat.
 | Field | Value |
 |---|---|
 | Branch | `main` |
-| Product candidate | See "Live run of `0f400a7`" below for the SHA of this build. It supersedes `0f400a7`, whose `/api/graph` fails against the live instance. |
+| Product candidate | `754abcb` — full SHA `754abcb2ddb40892b8a6817534fa39a6a39ce202`. Supersedes `0f400a7`, whose `/api/graph` fails against the live instance. **Deploy only — do not capture or seed again.** |
 | Tree state | Clean at that commit; `git status` empty |
 | Pushed to origin | `origin/main` |
 | Verified at that commit | **583 tests pass, 1 skipped** offline and **594 pass, 0 skipped** with the pinned extra, **89% coverage** (2698 statements, 289 missed), `ruff check` clean, `gtc-archive-verify` **8/8** (including a clean-environment wheel install), `gtc-safety-scan` **0 blockers / 0 warnings** across 82 tracked files, four-agent scenario runs end to end, judge workflow reproduces the result below unchanged, health 200, readiness 200 and `/api/graph` 200 seeded |
@@ -119,6 +119,8 @@ Artifact digests are reported by `gtc-archive-verify`, but the distributions are
 bit-for-bit reproducible — a digest identifies one specific build, it does not certify one.
 
 ## Live run of `0f400a7`: what happened, and what this build changes
+
+**Product SHA for the fix:** `754abcb2ddb40892b8a6817534fa39a6a39ce202` (`754abcb`).
 
 `0f400a7` was promoted and run against the shared instance. **Recorded as live evidence:**
 
