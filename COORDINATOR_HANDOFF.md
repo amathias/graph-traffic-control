@@ -66,7 +66,7 @@ live EC2 host from this project chat.
 | Field | Value |
 |---|---|
 | Branch | `main` |
-| Product candidate | See the commit recorded below; the two deployment blockers are cleared |
+| Product candidate | `3ea18e3` — see the full SHA in the commit log. Both deployment blockers cleared. |
 | Tree state | Clean at that commit; `git status` empty |
 | Pushed to origin | `origin/main` |
 | Verified at that commit | **523 tests pass**, **89% coverage** (2615 statements, 290 missed), `ruff check` clean, `gtc-archive-verify` **8/8** (including a clean-environment wheel install), `gtc-safety-scan` **0 blockers / 0 warnings** across 78 tracked files, four-agent scenario runs end to end, judge workflow reproduces the result below, health and readiness answer 200 |
