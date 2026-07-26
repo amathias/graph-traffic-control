@@ -39,11 +39,11 @@ live EC2 host from this project chat.
 | Milestone | Rejection corrected and product complete offline. **Live DataHub run outstanding.** |
 | Verified commit/artifact | See "Deployment candidate" below |
 | Build command | `python -m venv .venv && .venv/Scripts/python.exe -m pip install -e ".[dev]"` |
-| Test command | `.venv/Scripts/python.exe -m pytest` — **458 passed** in 146 s, no network required |
-| Coverage | `pytest --cov=graph_traffic_control` — **88%** (2490 statements, 294 missed) |
+| Test command | `.venv/Scripts/python.exe -m pytest` — **461 passed** in 144 s, no network required |
+| Coverage | `pytest --cov=graph_traffic_control` — **88%** (2501 statements, 295 missed). The largest gap is `release/archive.py` at 30%: its end-to-end path builds distributions and creates a virtual environment, so it runs as the `gtc-archive-verify` release command rather than in the suite. |
 | Lint command | `.venv/Scripts/python.exe -m ruff check .` — clean |
 | Build/archive check | `gtc-archive-verify` — **8/8 pass**, including a clean-environment wheel install |
-| Safety scan | `gtc-safety-scan` — **0 blockers, 0 warnings** across 71 tracked files |
+| Safety scan | `gtc-safety-scan` — **0 blockers, 0 warnings** across 78 tracked files |
 | Seed / reset | `gtc-seed` / `gtc-reset` (local, offline, always safe) |
 | DataHub state | `gtc-datahub-seed`, `gtc-datahub-reset`, `gtc-datahub-capture`, `gtc-datahub-restore` — **plan-only by default**; `--apply` requires live credentials |
 | Demo command | `gtc-demo [--export-examples examples]` |
@@ -57,17 +57,36 @@ live EC2 host from this project chat.
 | DataHub writeback | **Not verified live.** Reversible capture → write → re-read → restore, with verification and restoration tracked independently. **No live receipt exists.** |
 | DataHub ingestion | **Planned, never applied.** Deterministic guarded plans and recipe are produced; nothing has been written to the shared instance. |
 | Blockers | Live DataHub verification requires SSM access, which this session was instructed not to use. Everything else is complete. |
-| Evidence produced | 458 passing tests; `examples/`; sanitized receipts under `APP_STATE_DIR/receipts`; `docs/DECISIONS.md` ADR-001..015; `docs/LIMITATIONS.md`; `docs/SUBMISSION.md`; `docs/DEMO_RUNBOOK.md` |
+| Evidence produced | 461 passing tests; `examples/`; sanitized receipts under `APP_STATE_DIR/receipts`; `docs/DECISIONS.md` ADR-001..015; `docs/LIMITATIONS.md`; `docs/SUBMISSION.md`; `docs/DEMO_RUNBOOK.md` |
 
 ## Deployment candidate
 
 | Field | Value |
 |---|---|
 | Branch | `main` |
-| Product candidate | See the handoff HEAD recorded in the final report for this session |
+| Product candidate | `43ce1127` — see the full SHA in the commit log |
 | Tree state | Clean at that commit; `git status` empty |
 | Pushed to origin | `origin/main` |
-| Verified at that commit | 458 tests pass, 88% coverage, `ruff check` clean, archive verification 8/8, safety scan 0/0, four-agent scenario runs end to end, judge console and endpoints exercised on a running server |
+| Verified at that commit | 461 tests pass, 88% coverage, `ruff check` clean, archive verification 8/8 (including a clean-environment wheel install), safety scan 0 blockers / 0 warnings, four-agent scenario runs end to end, judge console and all eight endpoints exercised on a running uvicorn at `127.0.0.1:8105` |
+
+Judge-workflow result at that commit, fixture-backed, no DataHub:
+
+```
+context: fixture | graph fp: a50e2614d4f19532 (9 entities, 7 edges)
+  prop-a-rename-revenue      COMMITTED  approved=release-manager
+  prop-b-net-revenue-metric  COMMITTED  approved=release-manager
+      WRITE_READ       ORDER   with prop-a-rename-revenue   lineage_hops=0
+      UPSTREAM_SCHEMA  REBASE  with prop-a-rename-revenue   lineage_hops=2   <- the hidden conflict
+  prop-c-support-sla         COMMITTED  approved=-
+      SHARED_DOMAIN    WARN    with prop-a-rename-revenue   lineage_hops=0
+      SHARED_DOMAIN    WARN    with prop-b-net-revenue-metric  lineage_hops=0
+  prop-d-stale               ABORTED    (stale expected version)
+audited transitions: 23 | receipts: 10
+```
+
+The `UPSTREAM_SCHEMA / REBASE` row is the project's central claim: A and B **share no declared
+URN**, and the two-hop DataHub lineage path is the only thing that connects them. C's shared-domain
+rows are `WARN` and do not block, which is why C commits in parallel rather than queueing.
 
 Promote this commit only for a **fixture-mode** deployment, or after the live checks below are
 run on the host. In a non-local `APP_ENV` without `DATAHUB_MCP_URL` and `DATAHUB_TOKEN`, readiness
@@ -131,14 +150,14 @@ exactly what differs.
 
 | Coordinator gate | Status |
 |---|---|
-| Clean setup and tests pass | Verified — 458 passed, 88% coverage, `ruff check` clean |
+| Clean setup and tests pass | Verified — 461 passed, 88% coverage, `ruff check` clean |
 | Distributions build and install cleanly | Verified — `gtc-archive-verify` 8/8, wheel installed and run in a fresh venv outside the source tree |
 | Demo seed and reset deterministic | Verified — repeated seed byte-identical; reset idempotent and fixture-preserving; DataHub plans byte-identical with a stable fingerprint |
 | Reads real context from shared DataHub | **Not verified** — implemented against the observed contracts, tested against a strict protocol double only |
 | Performs and verifies supported writeback | **Not verified** — implemented, reversible, verification and restoration tracked independently; no live receipt |
 | Namespace and reset isolation tests pass | Verified — every surface that can reach shared state refuses all four sibling allocations (`lifeboat.`, `license.`, `forgetme.`, `fuzzer.`), unknown URN shapes, foreign `schemaField` parents, foreign domains and tags, and foreign URNs smuggled inside lineage and dashboard-input payloads |
 | Global reset is impossible | Verified — reset takes an explicit scope and accepts only `namespace`; ingestion recipe disables stale-entity removal |
-| No secrets or private evidence publishable | Verified — `gtc-safety-scan` 0 blockers / 0 warnings across 71 tracked files |
+| No secrets or private evidence publishable | Verified — `gtc-safety-scan` 0 blockers / 0 warnings across 78 tracked files |
 | Judge can evaluate without infrastructure | Verified — `GET /` runs the full scenario fixture-backed, with no DataHub, cloud account, or paid service. **Rendering not visually confirmed** (no browser tooling this session) |
 | Health endpoint works behind reverse proxy | Health/readiness verified on `127.0.0.1:8105`; the proxy path itself is untested from this chat |
 | Demo does not depend on another submission | Verified — no cross-project imports; full demo runs with no DataHub |
