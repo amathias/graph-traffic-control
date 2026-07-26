@@ -109,6 +109,23 @@ class TestScenarioPayload:
         assert paths, "a judge must be able to see the lineage path that proves the conflict"
         assert any(len(path) >= 2 for path in paths)
 
+    def test_no_proposal_is_shown_conflicting_with_itself(self, payload):
+        """The coordinator computes each pair both ways; the console must still name the other
+        party, not the proposal being looked at."""
+        for proposal in payload["proposals"]:
+            for conflict in proposal["conflicts"]:
+                assert conflict["counterpart"] != proposal["proposal_id"], (
+                    f"{proposal['proposal_id']} is shown conflicting with itself"
+                )
+
+    def test_one_disagreement_is_reported_once(self, payload):
+        for proposal in payload["proposals"]:
+            keys = [
+                (c["kind"], c["decision"], c["counterpart"], c["subject_urn"])
+                for c in proposal["conflicts"]
+            ]
+            assert len(keys) == len(set(keys)), f"{proposal['proposal_id']} double-counts"
+
     def test_an_unrelated_proposal_committed_in_parallel(self, payload):
         by_id = {p["proposal_id"]: p for p in payload["proposals"]}
         assert by_id["prop-c-support-sla"]["state"] == "COMMITTED"

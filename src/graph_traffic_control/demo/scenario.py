@@ -40,6 +40,31 @@ from graph_traffic_control.txn.coordinator import Coordinator, PrepareOutcome
 APPROVER = "release-manager"
 
 
+def _presentable_conflicts(proposal_id: str, conflicts: list[Conflict]) -> list[dict[str, Any]]:
+    """Serialise a proposal's conflicts from that proposal's point of view.
+
+    The coordinator computes each pair in both directions, so a conflict filed under a proposal
+    may have been raised *by* it or *against* it. Rendering the stored ``other_proposal_id``
+    verbatim therefore shows proposals conflicting with themselves, which reads as a bug on the
+    judge's primary screen. ``counterpart`` is always the other party, and the pair is
+    de-duplicated so one disagreement is reported once rather than twice.
+    """
+    presented: list[dict[str, Any]] = []
+    seen: set[tuple[str, ...]] = set()
+    for conflict in conflicts:
+        counterpart = (
+            conflict.other_proposal_id
+            if conflict.proposal_id == proposal_id
+            else conflict.proposal_id
+        )
+        key = (conflict.kind.value, conflict.decision.value, counterpart, conflict.subject_urn)
+        if key in seen:
+            continue
+        seen.add(key)
+        presented.append({**conflict.model_dump(mode="json"), "counterpart": counterpart})
+    return presented
+
+
 class ScenarioRunner:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -160,10 +185,9 @@ class ScenarioRunner:
                     "evidence": proposal.evidence,
                     "artifact_path": proposal.action.artifact_path,
                     "impact": prepare.impact.model_dump(mode="json") if prepare else None,
-                    "conflicts": [
-                        c.model_dump(mode="json")
-                        for c in self.conflicts.get(proposal_id, [])
-                    ],
+                    "conflicts": _presentable_conflicts(
+                        proposal_id, self.conflicts.get(proposal_id, [])
+                    ),
                     "reason": (commit.reason if commit else (prepare.reason if prepare else "")),
                     "approval_required": token.approval_required if token else False,
                     "approved_by": token.approved_by if token else None,

@@ -281,7 +281,8 @@ function renderProposal(p) {
 
   for (const c of p.conflicts || []) {
     const node = el("div", "conflict");
-    node.append(el("div", null, `${c.kind} → ${c.decision}: ${c.explanation}`));
+    const against = c.counterpart ? ` (with ${c.counterpart})` : "";
+    node.append(el("div", null, `${c.kind} → ${c.decision}${against}: ${c.explanation}`));
     if (c.lineage_path && c.lineage_path.length) {
       const path = el("div", "path");
       path.append(document.createTextNode("DataHub lineage path: "));
