@@ -70,7 +70,7 @@ live EC2 host from this project chat.
 | Field | Value |
 |---|---|
 | Branch | `main` |
-| Product candidate | See "Product SHA" at the top of the SDK-boundary section below. Supersedes `3ea18e3`, which **cannot be applied to DataHub at all**. |
+| Product candidate | `0f400a7` — full SHA `0f400a7da09349cf14489ab082c80ac7caf9a03c`. Supersedes `3ea18e3`, which **cannot be applied to DataHub at all**. |
 | Tree state | Clean at that commit; `git status` empty |
 | Pushed to origin | `origin/main` |
 | Verified at that commit | **552 tests pass, 1 skipped** offline and **563 pass, 0 skipped** with the pinned extra, **89% coverage** (2678 statements, 295 missed), `ruff check` clean, `gtc-archive-verify` **8/8** (including a clean-environment wheel install), `gtc-safety-scan` **0 blockers / 0 warnings** across 78 tracked files, four-agent scenario runs end to end, judge workflow reproduces the result below unchanged, health 200 and readiness 200 seeded |
@@ -119,6 +119,8 @@ Artifact digests are reported by `gtc-archive-verify`, but the distributions are
 bit-for-bit reproducible — a digest identifies one specific build, it does not certify one.
 
 ## The SDK-boundary blocker, and the three defects it was hiding
+
+**Product SHA:** `0f400a7da09349cf14489ab082c80ac7caf9a03c` (`0f400a7`).
 
 The coordinator's live gate found that `gtc-datahub-seed --apply` failed locally, before the first
 network operation: `apply_plan` called `DatahubRestEmitter.emit(op.as_dict())`, and the emitter
