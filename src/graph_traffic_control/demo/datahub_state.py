@@ -15,8 +15,28 @@ Three operations, all planned before anything is applied:
     ``datahub docker nuke`` is not expressible here: :func:`reset_plan` refuses any scope other
     than ``namespace``, and every operation is guarded individually anyway.
 
-``restore``
-    Put back what was captured before seeding, so a shared instance is left as found.
+``capture`` / ``restore``
+    Record what was there before seeding, and put it back, so a shared instance is left as found.
+
+First-time seeding and the absent state
+---------------------------------------
+The first time this project is seeded, the whole ``traffic.`` namespace is absent from the shared
+instance. "Leave it as you found it" then means *delete what you created*, not *restore values
+that never existed* — but a capture that simply skipped the missing entities would be
+indistinguishable from a capture taken against a half-broken instance, and restoring from it would
+silently leave this project's rows behind in a shared catalogue.
+
+Absence is therefore a **captured value**, not a gap:
+
+- capture records each allocated URN as either ``present`` (with its full state) or ``absent``,
+  and only records absence when the operator asks for it with ``--allow-absent``;
+- the union of present and absent must equal the allocation **exactly** — a capture that is
+  partial, carries an extra or foreign URN, or lists the same URN as both present and absent is
+  refused, because none of those can be turned into a correct restore;
+- restore returns present entities to their captured values and initially-absent entities to a
+  soft-deleted state, then **re-reads them and proves** they are absent again;
+- absence is only ever proved by reading the exact allowlisted URNs. There is no search, no
+  wildcard, and no scope in which "everything" is a legal target.
 
 Why a plan, not direct calls
 ----------------------------
@@ -47,6 +67,7 @@ applied to a live DataHub instance from this project chat** — see ``docs/LIMIT
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
@@ -68,10 +89,24 @@ RECIPE_FILENAME = "ingestion_recipe.yaml"
 MARKER_KEY = "graph_traffic_control"
 MARKER_VALUE = "graph-traffic-control-demo-seed-v1"
 
-#: The only scope a reset may run at. Present so that "global" is a value someone has to
-#: deliberately pass and be refused for, rather than an omission that silently widens the blast
-#: radius.
+#: The only scope a reset or restore may run at. Present so that "global" is a value someone has
+#: to deliberately pass and be refused for, rather than an omission that silently widens the
+#: blast radius.
 NAMESPACE_SCOPE = "namespace"
+
+#: Capture file contract. The version is checked on read: a capture written under a different
+#: contract may not distinguish "absent" from "not looked at", and restoring from one that cannot
+#: make that distinction is exactly the failure this contract exists to prevent.
+CAPTURE_KIND = "pre-seed-capture"
+CAPTURE_VERSION = 2
+
+#: Per-entity capture states.
+STATE_PRESENT = "present"
+STATE_ABSENT = "absent"
+
+#: Soft-delete payload. Shared by reset and by the absent branch of restore so that "returned to
+#: absent" and "removed by reset" are the same, inspectable operation.
+SOFT_DELETE_PAYLOAD = {"removed": True, "soft": True, "marker": MARKER_VALUE}
 
 DATASET_ASPECTS = (
     "datasetProperties",
@@ -196,6 +231,45 @@ def _guard_payload_references(
 
 def plan_kind(op: AspectOperation) -> str:
     return "seed" if op.change_type == "UPSERT" else "reset"
+
+
+def require_exact_allocation(
+    urns: Iterable[str], allocated: Iterable[str], *, operation: str
+) -> list[str]:
+    """Prove a URN set is *exactly* the allocation — no more, no fewer, no duplicates.
+
+    Set equality rather than containment is the whole point. Containment alone would accept a
+    capture covering three of nine entities and call the resulting restore complete; the reverse
+    would accept a plan reaching an entity this project never seeded. Both are refusals.
+    """
+    subject = list(urns)
+    duplicates = sorted({urn for urn in subject if subject.count(urn) > 1})
+    if duplicates:
+        raise PlanError(
+            f"{operation} refused: {', '.join(duplicates)} listed more than once. A duplicated "
+            "URN makes the intended state ambiguous."
+        )
+
+    expected = set(allocated)
+    if not expected:
+        raise PlanError(
+            f"{operation} refused: the allocation is empty. Run `gtc-seed` so the manifest lists "
+            "this project's traffic. entities."
+        )
+
+    found = set(subject)
+    if missing := sorted(expected - found):
+        raise PlanError(
+            f"{operation} refused: {', '.join(missing)} not covered. A partial set would leave "
+            "those entities in whatever state the run left them."
+        )
+    if extra := sorted(found - expected):
+        raise PlanError(
+            f"{operation} refused: {', '.join(extra)} is not in this project's allocation. "
+            "Operating on an entity this project did not seed is out of scope even inside the "
+            "namespace."
+        )
+    return sorted(found)
 
 
 # --------------------------------------------------------------------------------------
@@ -348,9 +422,18 @@ def _owner_urn(owner: str) -> str:
 
 
 def seed_plan(
-    graph: dict[str, Any], namespace: Namespace, settings: Settings
+    graph: dict[str, Any],
+    namespace: Namespace,
+    settings: Settings,
+    allocated_urns: Iterable[str] | None = None,
 ) -> DataHubPlan:
-    """Build the complete, guarded seed plan for the ``traffic.`` graph."""
+    """Build the complete, guarded seed plan for the ``traffic.`` graph.
+
+    When ``allocated_urns`` is supplied, the plan must cover it **exactly**. That turns "seed
+    creates the namespace" into a checked claim: a fixture that drifted from the manifest would
+    otherwise produce a seed that quietly creates a different set of entities than the one capture
+    recorded the absence of, and restore would then have nothing to delete for the difference.
+    """
     tag_urn = f"urn:li:tag:{namespace.project_tag}"
     edges = list(graph.get("edges", []))
     platform = graph.get("namespace", {}).get("platform", "duckdb")
@@ -374,7 +457,12 @@ def seed_plan(
         tag_urn=tag_urn,
         operations=tuple(operations),
     )
-    return guard_plan(plan, namespace, settings)
+    guard_plan(plan, namespace, settings)
+    if allocated_urns is not None:
+        require_exact_allocation(
+            plan.entity_urns, allocated_urns, operation="DataHub seed"
+        )
+    return plan
 
 
 # --------------------------------------------------------------------------------------
@@ -405,17 +493,7 @@ def reset_plan(
             "without removing anything; run `gtc-seed` so the manifest lists this allocation."
         )
 
-    operations = tuple(
-        AspectOperation(
-            urn,
-            _entity_type_of(urn),
-            "status",
-            "DELETE",
-            # Soft delete. Stale-entity removal stays disabled, per coordinator ruling 4.
-            {"removed": True, "soft": True, "marker": MARKER_VALUE},
-        )
-        for urn in sorted(set(allocated_urns))
-    )
+    operations = tuple(_soft_delete_operation(urn) for urn in sorted(set(allocated_urns)))
 
     plan = DataHubPlan(
         kind="reset",
@@ -425,6 +503,13 @@ def reset_plan(
         operations=operations,
     )
     return guard_plan(plan, namespace, settings)
+
+
+def _soft_delete_operation(urn: str) -> AspectOperation:
+    """Soft delete one entity. Stale-entity removal stays disabled, per coordinator ruling 4."""
+    return AspectOperation(
+        urn, _entity_type_of(urn), "status", "DELETE", dict(SOFT_DELETE_PAYLOAD)
+    )
 
 
 def _entity_type_of(urn: str) -> str:
@@ -441,38 +526,193 @@ def _entity_type_of(urn: str) -> str:
 # --------------------------------------------------------------------------------------
 
 
-def capture_state(client, namespace: Namespace, allocated_urns: list[str]) -> dict[str, Any]:
-    """Read the current state of the allocated entities, before a seed changes them.
+def capture_state(
+    client,
+    namespace: Namespace,
+    allocated_urns: list[str],
+    *,
+    allow_absent: bool = False,
+) -> dict[str, Any]:
+    """Record the current state of every allocated entity, before a seed changes it.
 
-    Requires a live MCP client. Fails closed: a capture that could not read everything is not a
-    capture, and restoring from a partial one would silently drop whatever was missed.
+    Requires a live MCP client. Each allocated URN is read **by name** — one exact URN per call,
+    never a search — and lands in exactly one of two buckets:
+
+    ``present``
+        the entity exists and is not soft-deleted; its full state is stored verbatim.
+
+    ``absent``
+        the entity is missing, or present but soft-deleted. Recorded only when ``allow_absent``
+        is set, so first-time seeding is a deliberate declaration rather than a silent skip.
+
+    Fails closed everywhere else. Without ``allow_absent`` a missing entity is still an error, so
+    an instance that lost half this project's rows cannot be mistaken for a fresh one. A response
+    naming a URN that was not asked for is refused outright: it makes presence ambiguous, and a
+    restore built on an ambiguous capture could write to an entity nobody asked about.
     """
     from graph_traffic_control.context.datahub import (
         TOOL_GET_ENTITIES,
         entities_from_result,
+        is_soft_deleted,
+        present_urns_from_result,
     )
 
     guarded = namespace.require_all(allocated_urns, operation="DataHub capture")
     if not guarded:
         raise PlanError("Nothing to capture: the allocation is empty.")
+    urns = require_exact_allocation(guarded, guarded, operation="DataHub capture")
 
-    captured: dict[str, Any] = {}
-    for urn in sorted(guarded):
+    present: dict[str, Any] = {}
+    absent: list[str] = []
+
+    for urn in urns:
         payload = client.call_tool_structured(TOOL_GET_ENTITIES, {"urns": [urn]})
-        captured[urn] = entities_from_result(payload, [urn])[urn]
+        returned = present_urns_from_result(payload)
+        if unrequested := sorted(returned - {urn}):
+            raise PlanError(
+                f"Capture refused: asking for {urn} returned {', '.join(unrequested)} as well. "
+                "An unrequested entity in the response makes presence ambiguous."
+            )
+
+        if urn in returned:
+            entity = entities_from_result(payload, [urn])[urn]
+            if not is_soft_deleted(entity):
+                present[urn] = entity
+                continue
+            reason = "present but soft-deleted"
+        else:
+            reason = "absent"
+
+        if not allow_absent:
+            raise PlanError(
+                f"Capture refused: {urn} is {reason} in DataHub. If this is a first-time seed "
+                "and the whole allocation is expected to be missing, re-run with "
+                "`--allow-absent` to capture the absent state deliberately. Otherwise this is a "
+                "damaged catalogue, not a fresh one, and restoring from it would be wrong."
+            )
+        absent.append(urn)
 
     return {
-        "kind": "pre-seed-capture",
+        "kind": CAPTURE_KIND,
+        "capture_version": CAPTURE_VERSION,
         "urn_prefix": namespace.urn_prefix,
-        "entity_count": len(captured),
-        "entities": captured,
+        "allocated": urns,
+        "entities": present,
+        "absent": sorted(absent),
+        "entity_count": len(present),
+        "absent_count": len(absent),
     }
 
 
+def verify_capture(
+    capture: dict[str, Any], namespace: Namespace, allocated_urns: Iterable[str]
+) -> tuple[dict[str, Any], list[str]]:
+    """Prove a capture describes the exact allocation, and split it into present and absent.
+
+    Every refusal here is a restore that would have been wrong:
+
+    - a foreign URN would let a restore write outside this project's allocation;
+    - a partial capture would leave the entities it missed behind after a restore;
+    - an extra URN would restore something this project never seeded;
+    - a URN listed as both present and absent has no single intended end state;
+    - an unrecognised ``kind`` or ``capture_version`` may not distinguish "absent" from "not
+      looked at", so its absent set cannot be acted on.
+    """
+    if capture.get("kind") != CAPTURE_KIND:
+        raise PlanError(
+            f"Not a capture file: kind is {capture.get('kind')!r}, expected {CAPTURE_KIND!r}."
+        )
+    if capture.get("capture_version") != CAPTURE_VERSION:
+        raise PlanError(
+            f"Capture version {capture.get('capture_version')!r} is not {CAPTURE_VERSION}. "
+            "Re-run `gtc-datahub-capture`: an older capture cannot prove which entities were "
+            "absent, only which ones it happened to record."
+        )
+    if capture.get("urn_prefix") != namespace.urn_prefix:
+        raise NamespaceViolation(
+            f"Capture declares prefix {capture.get('urn_prefix')!r}, but this project is "
+            f"allocated {namespace.urn_prefix!r}."
+        )
+
+    entities = capture.get("entities")
+    absent = capture.get("absent")
+    if not isinstance(entities, dict) or not isinstance(absent, list):
+        raise PlanError(
+            "Capture is malformed: 'entities' must be an object and 'absent' a list. Re-run "
+            "`gtc-datahub-capture`."
+        )
+
+    namespace.require_all(entities, operation="DataHub restore")
+    namespace.require_all(absent, operation="DataHub restore")
+
+    if overlap := sorted(set(entities) & set(absent)):
+        raise PlanError(
+            f"Capture is ambiguous: {', '.join(overlap)} recorded as both present and absent. "
+            "There is no single state to restore to."
+        )
+
+    covered = [*entities, *absent]
+    declared = capture.get("allocated")
+    if not isinstance(declared, list):
+        raise PlanError("Capture is malformed: 'allocated' must be a list of URNs.")
+    require_exact_allocation(declared, covered, operation="DataHub restore (capture coverage)")
+    require_exact_allocation(covered, allocated_urns, operation="DataHub restore")
+
+    return entities, sorted(absent)
+
+
+def verify_absent(client, namespace: Namespace, urns: Iterable[str]) -> dict[str, Any]:
+    """Re-read the given URNs and prove each is absent or soft-deleted.
+
+    This is what makes "restored to absent" a fact rather than an intention. A restore that
+    soft-deleted nine entities and left one live would otherwise report success, and the leftover
+    row would sit in a shared catalogue under this project's name.
+
+    Reads by exact URN only. Refuses rather than reports if any entity is still live.
+    """
+    from graph_traffic_control.context.datahub import (
+        TOOL_GET_ENTITIES,
+        entities_from_result,
+        is_soft_deleted,
+        present_urns_from_result,
+    )
+
+    checked = namespace.require_all(urns, operation="DataHub absence verification")
+    still_live: list[str] = []
+
+    for urn in sorted(set(checked)):
+        payload = client.call_tool_structured(TOOL_GET_ENTITIES, {"urns": [urn]})
+        if urn not in present_urns_from_result(payload):
+            continue
+        if not is_soft_deleted(entities_from_result(payload, [urn])[urn]):
+            still_live.append(urn)
+
+    if still_live:
+        raise PlanError(
+            f"Absence not verified: {', '.join(sorted(still_live))} still present and not "
+            "soft-deleted after restore. The shared instance has been left with this project's "
+            "entities in it."
+        )
+    return {"verified_absent": sorted(set(checked)), "checked": len(set(checked))}
+
+
 def restore_plan(
-    capture: dict[str, Any], namespace: Namespace, settings: Settings
+    capture: dict[str, Any],
+    namespace: Namespace,
+    settings: Settings,
+    allocated_urns: Iterable[str],
+    scope: str = NAMESPACE_SCOPE,
 ) -> DataHubPlan:
-    """Build a plan that puts every captured entity back the way it was found."""
+    """Build a plan that returns every allocated entity to the state the capture recorded.
+
+    ``allocated_urns`` is required, not optional: a restore is only correct relative to a declared
+    allowlist, and :func:`verify_capture` proves the capture covers that allowlist exactly before
+    a single operation is built.
+
+    Present entities are restored to their captured values. Initially-absent entities are
+    soft-deleted, which is the only honest way to return an instance that never had them to the
+    state it was in. ``scope`` mirrors reset's: "everything" has to be asked for and refused.
+    """
     from graph_traffic_control.context.datahub import (
         extract_description,
         extract_domain,
@@ -480,14 +720,16 @@ def restore_plan(
         extract_tags,
     )
 
-    entities = capture.get("entities", {})
-    if not entities:
-        raise PlanError(
-            "Restore plan is empty. A capture with no entities cannot restore anything, and "
-            "emitting an empty plan would report a successful restore that did nothing."
+    if scope != NAMESPACE_SCOPE:
+        raise NamespaceViolation(
+            f"Restore scope {scope!r} refused. Only {NAMESPACE_SCOPE!r} is permitted: a restore "
+            "is a write against a shared instance and is only ever addressed to this project's "
+            "captured allowlist."
         )
 
-    operations: list[AspectOperation] = []
+    entities, absent = verify_capture(capture, namespace, allocated_urns)
+
+    operations: list[AspectOperation] = [_soft_delete_operation(urn) for urn in absent]
     for urn in sorted(entities):
         entity = entities[urn]
         entity_type = _entity_type_of(urn)
@@ -544,7 +786,11 @@ def restore_plan(
         tag_urn=f"urn:li:tag:{namespace.project_tag}",
         operations=tuple(operations),
     )
-    return guard_plan(plan, namespace, settings)
+    guard_plan(plan, namespace, settings)
+    # Belt and braces: the capture was already proved to cover the allocation exactly, so the
+    # plan built from it must too. This catches a construction bug, not a bad input.
+    require_exact_allocation(plan.entity_urns, allocated_urns, operation="DataHub restore plan")
+    return plan
 
 
 # --------------------------------------------------------------------------------------
@@ -602,6 +848,34 @@ def write_plan(plan: DataHubPlan, settings: Settings, filename: str) -> dict[str
         "entity_count": len(plan.entity_urns),
         "operation_count": len(plan.operations),
     }
+
+
+def capture_path(settings: Settings) -> Any:
+    """Where the pre-seed capture lives. One fixed path, so restore cannot be pointed elsewhere."""
+    return settings.state_dir / DATAHUB_STATE_DIRNAME / CAPTURE_FILENAME
+
+
+def write_capture(capture: dict[str, Any], settings: Settings) -> Any:
+    directory = settings.state_dir / DATAHUB_STATE_DIRNAME
+    directory.mkdir(parents=True, exist_ok=True)
+    path = capture_path(settings)
+    path.write_text(json.dumps(capture, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def load_capture(settings: Settings) -> dict[str, Any]:
+    """Read the capture, or say exactly how to produce one. Never invents an empty capture."""
+    path = capture_path(settings)
+    if not path.is_file():
+        raise PlanError(
+            f"No capture at {path}. Run `gtc-datahub-capture` before seeding, so there is a "
+            "recorded state to restore to. If the traffic. namespace does not exist yet, run "
+            "`gtc-datahub-capture --allow-absent` to record that absence deliberately."
+        )
+    capture = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(capture, dict):
+        raise PlanError(f"Capture at {path} is not an object.")
+    return capture
 
 
 def apply_plan(plan: DataHubPlan, namespace: Namespace, settings: Settings) -> dict[str, Any]:

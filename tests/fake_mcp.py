@@ -58,9 +58,13 @@ def entity_payload(
     owners: list[str] | None = None,
     tags: list[str] | None = None,
     domain: str | None = None,
+    removed: bool | None = None,
 ) -> dict[str, Any]:
     """Build an entity in the nested governance shape the real server returns."""
     payload: dict[str, Any] = {"urn": urn, "properties": {}}
+    if removed is not None:
+        # A soft-deleted entity is still returned by get_entities, carrying status.removed.
+        payload["status"] = {"removed": removed}
     if name is not None:
         payload["properties"]["name"] = name
     if description is not None:
@@ -98,6 +102,11 @@ class FakeMcpState:
     def add_entity(self, urn: str, **kwargs: Any) -> dict[str, Any]:
         self.entities[urn] = entity_payload(urn, **kwargs)
         return self.entities[urn]
+
+    def soft_delete(self, urn: str) -> None:
+        """Mark an existing entity removed, the way a soft delete leaves it."""
+        entity = self.entities[urn]
+        self.entities[urn] = {**entity, "status": {"removed": True}}
 
     def description_of(self, urn: str) -> str | None:
         entity = self.entities.get(urn, {})

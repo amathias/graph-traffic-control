@@ -300,6 +300,16 @@ def extract_domain(entity: dict[str, Any]) -> str | None:
     return None
 
 
+def is_soft_deleted(entity: dict[str, Any]) -> bool:
+    """True when DataHub returned the entity but marked it removed.
+
+    A soft-deleted entity is still *returned* by ``get_entities``, so presence in a response is
+    not presence in the catalogue. Capture and restore treat removed entities as absent, which is
+    what makes "return this entity to the absent state I found it in" checkable after the fact.
+    """
+    return _mapping(entity.get("status")).get("removed") is True
+
+
 def extract_criticality(entity: dict[str, Any]) -> Criticality:
     """Map a tier tag or an explicit criticality property onto the project's enum."""
     candidates = [

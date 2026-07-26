@@ -25,7 +25,15 @@ from graph_traffic_control.context.namespace import (
     NamespaceViolation,
     require_contained_path,
 )
-from graph_traffic_control.demo.datahub_state import reset_plan, seed_plan
+from graph_traffic_control.demo.datahub_state import (
+    CAPTURE_KIND,
+    CAPTURE_VERSION,
+    capture_state,
+    reset_plan,
+    restore_plan,
+    seed_plan,
+    verify_absent,
+)
 from graph_traffic_control.demo.reset import reset
 from graph_traffic_control.demo.seed import load_fixture_graph
 from graph_traffic_control.domain.clock import ManualClock
@@ -91,6 +99,41 @@ class TestEverySurfaceRefusesASiblingProject:
     def test_datahub_reset_plan(self, seeded_settings, namespace, prefix):
         with pytest.raises(NamespaceViolation):
             reset_plan([sibling_dataset(prefix)], namespace, seeded_settings)
+
+    def test_datahub_capture_refuses_before_making_any_call(self, namespace, prefix):
+        state = FakeMcpState()
+        with FakeMcpServer(state) as server:
+            client = McpClient(server.url, TOKEN)
+            with pytest.raises(NamespaceViolation):
+                capture_state(
+                    client, namespace, [sibling_dataset(prefix)], allow_absent=True
+                )
+            client.close()
+        assert state.calls == [], "--allow-absent must not widen who may be read"
+
+    def test_absence_verification_refuses_before_making_any_call(self, namespace, prefix):
+        """Reading a sibling's entity to prove it is gone is still reading a sibling's entity."""
+        state = FakeMcpState()
+        with FakeMcpServer(state) as server:
+            client = McpClient(server.url, TOKEN)
+            with pytest.raises(NamespaceViolation):
+                verify_absent(client, namespace, [sibling_dataset(prefix)])
+            client.close()
+        assert state.calls == []
+
+    def test_datahub_restore_plan(self, seeded_settings, namespace, prefix):
+        """A capture naming a sibling cannot become a plan that soft-deletes it."""
+        sibling = sibling_dataset(prefix)
+        capture = {
+            "kind": CAPTURE_KIND,
+            "capture_version": CAPTURE_VERSION,
+            "urn_prefix": namespace.urn_prefix,
+            "allocated": [sibling],
+            "entities": {},
+            "absent": [sibling],
+        }
+        with pytest.raises(NamespaceViolation):
+            restore_plan(capture, namespace, seeded_settings, [sibling])
 
     def test_context_read_allocation(self, namespace, prefix):
         from graph_traffic_control.context.datahub import DataHubContextProvider
