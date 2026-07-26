@@ -70,7 +70,7 @@ live EC2 host from this project chat.
 | Field | Value |
 |---|---|
 | Branch | `main` |
-| Product candidate | See "The lineage index is empty" above. Supersedes `754abcb`. **Deploying it will not make the instance ready** — the remaining failure is a DataHub graph-index problem. Deploy only; do not capture or seed. |
+| Product candidate | `caf03d4` — full SHA `caf03d45ba83b399c1d101c411a11e090d7408de`. Supersedes `754abcb`. **Deploying it will not make the instance ready** — the remaining failure is a DataHub graph-index problem needing a reindex. Deploy only; do not capture or seed. |
 | Tree state | Clean at that commit; `git status` empty |
 | Pushed to origin | `origin/main` |
 | Verified at that commit | **595 tests pass, 1 skipped** offline and **606 pass, 0 skipped** with the pinned extra, **89% coverage** (2711 statements, 291 missed), `ruff check` clean, `gtc-archive-verify` **8/8** (including a clean-environment wheel install), `gtc-safety-scan` **0 blockers / 0 warnings** across 84 tracked files, four-agent scenario runs end to end, judge workflow reproduces the result below unchanged, health 200, readiness 200 and `/api/graph` 200 seeded (fixture mode) |
@@ -119,6 +119,8 @@ Artifact digests are reported by `gtc-archive-verify`, but the distributions are
 bit-for-bit reproducible — a digest identifies one specific build, it does not certify one.
 
 ## The lineage index is empty. This is not a code defect, and must not be "fixed" in code.
+
+**Product SHA:** `caf03d45ba83b399c1d101c411a11e090d7408de` (`caf03d4`).
 
 The live run of `754abcb` returned **503 `graph_unreadable`** with all nine allocated entities
 found, failing on:
