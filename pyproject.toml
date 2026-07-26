@@ -24,6 +24,7 @@ datahub = [
   "mcp>=1.9,<2",
 ]
 dev = [
+  "build>=1.2,<2",
   "httpx>=0.28,<1",
   "pytest>=8.3,<9",
   "pytest-cov>=6,<8",
@@ -39,6 +40,8 @@ gtc-datahub-seed = "graph_traffic_control.demo.datahub_cli:seed_main"
 gtc-datahub-reset = "graph_traffic_control.demo.datahub_cli:reset_main"
 gtc-datahub-capture = "graph_traffic_control.demo.datahub_cli:capture_main"
 gtc-datahub-restore = "graph_traffic_control.demo.datahub_cli:restore_main"
+gtc-safety-scan = "graph_traffic_control.release.safety_scan:main"
+gtc-archive-verify = "graph_traffic_control.release.archive:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/graph_traffic_control"]
