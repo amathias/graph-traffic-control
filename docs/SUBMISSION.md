@@ -124,7 +124,8 @@ This project distinguishes what has been executed from what has been implemented
 conflict; the full state machine; lease expiry; pre-commit drift detection; real SQL artifact
 mutation and rollback; the MCP client's wire protocol over real HTTP against a strict localhost
 protocol double; the reversible writeback sequence; readiness; namespace isolation; deterministic
-DataHub seed/reset/restore planning; and the judge console.
+DataHub seed/reset/capture/restore planning, including the absent-state contract that makes a
+first-time seed of a shared instance recoverable and provably reversible; and the judge console.
 
 **Implemented but NOT yet verified against a live DataHub instance:** the MCP tool responses
 themselves, and any writeback receipt from a real entity. All protocol-double results are

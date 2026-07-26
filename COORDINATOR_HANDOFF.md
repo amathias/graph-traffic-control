@@ -36,16 +36,18 @@ live EC2 host from this project chat.
 | Field | Current value |
 |---|---|
 | Status | `in progress` |
-| Milestone | Rejection corrected and product complete offline. **Live DataHub run outstanding.** |
+| Milestone | Rejection corrected, deployment blockers cleared, product complete offline. **Live DataHub run outstanding.** |
 | Verified commit/artifact | See "Deployment candidate" below |
 | Build command | `python -m venv .venv && .venv/Scripts/python.exe -m pip install -e ".[dev]"` |
-| Test command | `.venv/Scripts/python.exe -m pytest` — **461 passed** in 144 s, no network required |
-| Coverage | `pytest --cov=graph_traffic_control` — **88%** (2501 statements, 295 missed). The largest gap is `release/archive.py` at 30%: its end-to-end path builds distributions and creates a virtual environment, so it runs as the `gtc-archive-verify` release command rather than in the suite. |
+| DataHub extra | `pip install -e ".[datahub]"` on the host — **pinned exactly** to `acryl-datahub==1.6.0.15` and `mcp==1.28.1` (ADR-017). Not installed or imported in this session. |
+| Test command | `.venv/Scripts/python.exe -m pytest` — **523 passed** in 203 s, no network required |
+| Coverage | `pytest --cov=graph_traffic_control` — **89%** (2615 statements, 290 missed). The largest gap remains `release/archive.py` at 30%: its end-to-end path builds distributions and creates a virtual environment, so it runs as the `gtc-archive-verify` release command rather than in the suite. |
 | Lint command | `.venv/Scripts/python.exe -m ruff check .` — clean |
 | Build/archive check | `gtc-archive-verify` — **8/8 pass**, including a clean-environment wheel install |
 | Safety scan | `gtc-safety-scan` — **0 blockers, 0 warnings** across 78 tracked files |
 | Seed / reset | `gtc-seed` / `gtc-reset` (local, offline, always safe) |
 | DataHub state | `gtc-datahub-seed`, `gtc-datahub-reset`, `gtc-datahub-capture`, `gtc-datahub-restore` — **plan-only by default**; `--apply` requires live credentials |
+| First-time seeding | `gtc-datahub-capture --allow-absent` records the deliberate absence of the exact allocation, seed creates exactly that set, and restore soft-deletes it back to absent and **re-reads to prove it** (ADR-016). Absence never enters a capture implicitly. |
 | Demo command | `gtc-demo [--export-examples examples]` |
 | Run command | `gtc-api` (uvicorn, `APP_HOST`:`APP_PORT`) |
 | Judge UI | `GET /` — self-contained page; one button runs the whole scenario |
@@ -57,36 +59,42 @@ live EC2 host from this project chat.
 | DataHub writeback | **Not verified live.** Reversible capture → write → re-read → restore, with verification and restoration tracked independently. **No live receipt exists.** |
 | DataHub ingestion | **Planned, never applied.** Deterministic guarded plans and recipe are produced; nothing has been written to the shared instance. |
 | Blockers | Live DataHub verification requires SSM access, which this session was instructed not to use. Everything else is complete. |
-| Evidence produced | 461 passing tests; `examples/`; sanitized receipts under `APP_STATE_DIR/receipts`; `docs/DECISIONS.md` ADR-001..015; `docs/LIMITATIONS.md`; `docs/SUBMISSION.md`; `docs/DEMO_RUNBOOK.md` |
+| Evidence produced | 523 passing tests; `examples/`; sanitized receipts under `APP_STATE_DIR/receipts`; `docs/DECISIONS.md` ADR-001..017; `docs/LIMITATIONS.md`; `docs/SUBMISSION.md`; `docs/DEMO_RUNBOOK.md` |
 
 ## Deployment candidate
 
 | Field | Value |
 |---|---|
 | Branch | `main` |
-| Product candidate | `43ce1127` — see the full SHA in the commit log |
+| Product candidate | See the commit recorded below; the two deployment blockers are cleared |
 | Tree state | Clean at that commit; `git status` empty |
 | Pushed to origin | `origin/main` |
-| Verified at that commit | 461 tests pass, 88% coverage, `ruff check` clean, archive verification 8/8 (including a clean-environment wheel install), safety scan 0 blockers / 0 warnings, four-agent scenario runs end to end, judge console and all eight endpoints exercised on a running uvicorn at `127.0.0.1:8105` |
+| Verified at that commit | **523 tests pass**, **89% coverage** (2615 statements, 290 missed), `ruff check` clean, `gtc-archive-verify` **8/8** (including a clean-environment wheel install), `gtc-safety-scan` **0 blockers / 0 warnings** across 78 tracked files, four-agent scenario runs end to end, judge workflow reproduces the result below, health and readiness answer 200 |
 
-Judge-workflow result at that commit, fixture-backed, no DataHub:
+Judge-workflow result at that commit, fixture-backed, no DataHub, read from `POST /api/demo/run`:
 
 ```
 context: fixture | graph fp: a50e2614d4f19532 (9 entities, 7 edges)
   prop-a-rename-revenue      COMMITTED  approved=release-manager
   prop-b-net-revenue-metric  COMMITTED  approved=release-manager
-      WRITE_READ       ORDER   with prop-a-rename-revenue   lineage_hops=0
-      UPSTREAM_SCHEMA  REBASE  with prop-a-rename-revenue   lineage_hops=2   <- the hidden conflict
+      WRITE_READ       ORDER   with prop-a-rename-revenue      lineage_hops=0
+      UPSTREAM_SCHEMA  REBASE  with prop-a-rename-revenue      lineage_hops=1   <- the hidden conflict
   prop-c-support-sla         COMMITTED  approved=-
-      SHARED_DOMAIN    WARN    with prop-a-rename-revenue   lineage_hops=0
+      SHARED_DOMAIN    WARN    with prop-a-rename-revenue      lineage_hops=0
       SHARED_DOMAIN    WARN    with prop-b-net-revenue-metric  lineage_hops=0
   prop-d-stale               ABORTED    (stale expected version)
 audited transitions: 23 | receipts: 10
 ```
 
+`lineage_hops` is `len(lineage_path) - 1`, matching the engine's own explanation string. The
+previous revision of this document recorded that row as `lineage_hops=2` and described a "two-hop"
+path; that counted the two *nodes* on the path, not the hops between them. The conflict itself is
+unchanged — the corrected figure is **1 hop** across a two-node path,
+`traffic.fct_revenue -> traffic.metric_net_revenue`.
+
 The `UPSTREAM_SCHEMA / REBASE` row is the project's central claim: A and B **share no declared
-URN**, and the two-hop DataHub lineage path is the only thing that connects them. C's shared-domain
-rows are `WARN` and do not block, which is why C commits in parallel rather than queueing.
+URN**, and that DataHub lineage path is the only thing that connects them. C's shared-domain rows
+are `WARN` and do not block, which is why C commits in parallel rather than queueing.
 
 Promote this commit only for a **fixture-mode** deployment, or after the live checks below are
 run on the host. In a non-local `APP_ENV` without `DATAHUB_MCP_URL` and `DATAHUB_TOKEN`, readiness
@@ -116,6 +124,22 @@ The previous candidate (`61998c0`) was rejected before deployment. The substanti
 7. **Judge console, submission copy, demo runbook, archive verification, isolation tests, and
    release safety scanning** added.
 
+## Deployment blockers cleared after coordinator verification
+
+Coordinator verification passed the suite and Ruff but found two blockers. Both are fixed:
+
+1. **DataHub optional dependencies pinned exactly** to `acryl-datahub==1.6.0.15` and
+   `mcp==1.28.1`, replacing compatible ranges. Every read fails closed on an unrecognised shape,
+   so a floating range would convert a patch release into a refused deploy against a shared
+   instance. Asserted by the test suite. ADR-017.
+2. **First-time seeding is now recoverable.** The previous instructions required capture before
+   seed, but capture refused a missing allocated entity — which is every entity, on the first run.
+   Absence is now an explicitly captured value with a fail-closed contract: `--allow-absent`,
+   exact-allowlist checks on capture and restore, soft delete back to absent, and post-apply
+   verification that the entities are actually gone. ADR-016.
+
+Neither change touches the product behaviour the previous candidate was verified on.
+
 ## Live verification the coordinator must run on the host
 
 None of these have been executed. They are the remaining gate between this candidate and a
@@ -126,18 +150,29 @@ truthful "reads and writes real DataHub context" claim.
    Readiness now names precisely what is missing: tools, tag, domain, or specific entities.
 2. Confirm the MCP server exposes `get_entities`, `get_lineage`, `list_schema_fields`, and
    `update_description`.
-3. `gtc-datahub-capture`, then `gtc-datahub-seed --apply`. Inspect
+3. **Capture first, and expect the `traffic.` namespace to be absent on the first run.** Run
+   `gtc-datahub-capture`. If it refuses because entities are missing, that refusal is correct and
+   is telling you this is a first-time seed: re-run `gtc-datahub-capture --allow-absent` to record
+   that absence deliberately. Then `gtc-datahub-seed --apply`. Inspect
    `APP_STATE_DIR/datahub/seed_plan.json` first — it is inert and deterministic, and its
    fingerprint is printed. Ingestion is namespace-scoped with stale-entity removal disabled.
+   Do **not** seed before capturing: a capture taken after a seed records this project's own rows
+   as the state to return the shared instance to, and the catalogue never gets clean again.
 4. Run one writeback and keep the receipt. Verify `verified: true` **and** `restored: true`, and
    confirm in the DataHub UI that the description returned to its original value.
-5. **Confirm the `update_description` `operation` value.** The argument *names* were supplied by
+5. `gtc-datahub-restore --apply` at the end. If the capture recorded absent entities, restore
+   soft-deletes exactly those and then re-reads them through MCP to prove they are gone; it
+   refuses to report success otherwise, and refuses outright if `DATAHUB_MCP_URL` and
+   `DATAHUB_TOKEN` are not both set to perform that re-read. Confirm the printed
+   `verified absent: N ...` line, then confirm in the DataHub UI that no `traffic.` entity
+   remains listed.
+6. **Confirm the `update_description` `operation` value.** The argument *names* were supplied by
    the coordinator; this *value* was not. It defaults to `SET` and is configurable via
    `DATAHUB_DESCRIPTION_OPERATION`. It must have replace-in-place semantics, or restoration
    cannot return the captured original exactly.
-6. Re-record `demo/fixtures/graph-traffic-control/graph.json` from the live instance so the
+7. Re-record `demo/fixtures/graph-traffic-control/graph.json` from the live instance so the
    offline suite reflects real shapes.
-7. Open `/` and confirm the judge console renders. **No browser tooling was available in this
+8. Open `/` and confirm the judge console renders. **No browser tooling was available in this
    session**, so the page's payload, script syntax, and element wiring are tested but its
    rendering is unconfirmed.
 
@@ -150,13 +185,14 @@ exactly what differs.
 
 | Coordinator gate | Status |
 |---|---|
-| Clean setup and tests pass | Verified — 461 passed, 88% coverage, `ruff check` clean |
+| Clean setup and tests pass | Verified — 523 passed, 89% coverage, `ruff check` clean |
 | Distributions build and install cleanly | Verified — `gtc-archive-verify` 8/8, wheel installed and run in a fresh venv outside the source tree |
 | Demo seed and reset deterministic | Verified — repeated seed byte-identical; reset idempotent and fixture-preserving; DataHub plans byte-identical with a stable fingerprint |
 | Reads real context from shared DataHub | **Not verified** — implemented against the observed contracts, tested against a strict protocol double only |
 | Performs and verifies supported writeback | **Not verified** — implemented, reversible, verification and restoration tracked independently; no live receipt |
 | Namespace and reset isolation tests pass | Verified — every surface that can reach shared state refuses all four sibling allocations (`lifeboat.`, `license.`, `forgetme.`, `fuzzer.`), unknown URN shapes, foreign `schemaField` parents, foreign domains and tags, and foreign URNs smuggled inside lineage and dashboard-input payloads |
-| Global reset is impossible | Verified — reset takes an explicit scope and accepts only `namespace`; ingestion recipe disables stale-entity removal |
+| Global reset is impossible | Verified — reset **and restore** take an explicit scope and accept only `namespace`; every removal is a soft delete addressed to an exact allowlisted URN; no surface performs a search or wildcard read; ingestion recipe disables stale-entity removal |
+| First-time seeding is recoverable | Verified — absence of the exact allocation can be captured deliberately, seed creates exactly that set, restore returns it to a verified soft-deleted state, and partial, extra, foreign, ambiguous, and version-mismatched captures are refused (ADR-016) |
 | No secrets or private evidence publishable | Verified — `gtc-safety-scan` 0 blockers / 0 warnings across 78 tracked files |
 | Judge can evaluate without infrastructure | Verified — `GET /` runs the full scenario fixture-backed, with no DataHub, cloud account, or paid service. **Rendering not visually confirmed** (no browser tooling this session) |
 | Health endpoint works behind reverse proxy | Health/readiness verified on `127.0.0.1:8105`; the proxy path itself is untested from this chat |
@@ -181,7 +217,8 @@ exactly what differs.
 - Fail-closed context reads: an MCP error or unrecognised shape aborts, never empties (ADR-012).
 - `COMMITTED` gated on positively verified mutation and writeback, seven independently tracked
   signals (ADR-013).
-- Deterministic, whole-plan-guarded DataHub seed/reset/capture/restore (ADR-014).
+- Deterministic, whole-plan-guarded DataHub seed/reset/capture/restore (ADR-014), with absence as
+  an explicitly captured, exactly-checked, post-apply-verified state (ADR-016).
 - Self-contained judge console served from inside the package (ADR-015).
 - `gtc-safety-scan` and `gtc-archive-verify` as pre-publication gates.
 

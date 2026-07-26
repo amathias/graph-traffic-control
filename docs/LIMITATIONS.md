@@ -32,7 +32,12 @@ Verified locally, in this workspace, by the committed test suite:
   rather than a sample, and every fail-closed branch.
 - Deterministic, namespace-guarded DataHub seed, reset, capture, and restore **planning**,
   including refusal of all four sibling allocations, of foreign URNs smuggled inside lineage and
-  dashboard-input payloads, of a foreign domain or tag, and of any reset scope but `namespace`.
+  dashboard-input payloads, of a foreign domain or tag, and of any reset or restore scope but
+  `namespace`.
+- **The absent-state contract** (ADR-016): capturing the deliberate absence of every allocated
+  entity, treating a soft-deleted entity as absent, planning a soft delete back to absent,
+  proving that absence by re-reading afterwards, and refusing partial, extra, foreign, ambiguous,
+  and version-mismatched captures. Exercised against the protocol double over real HTTP.
 - Cross-project isolation asserted at every surface that can reach shared state.
 - The judge console's payload, self-containment, script syntax, and element wiring.
 - Public-release safety scanning and archive verification, including a clean-environment install.
@@ -54,6 +59,8 @@ against a live DataHub Core v1.6.0 instance**:
 | MCP response envelopes (`structuredContent.result`, `.downstreams.searchResults[*].entity.urn`, `.fields`) | Same: coordinator-observed, implemented exactly, not confirmed here. |
 | `update_description` **`operation` value** | **Not coordinator-supplied.** The argument *name* is; the value is not. Defaults to `SET` and is configurable via `DATAHUB_DESCRIPTION_OPERATION`. Replace-in-place semantics are required, because an append-style operation could not restore the captured original exactly. Confirm this on the host before trusting a restore. |
 | Whether mutation tools are enabled on the deployed bridge | Coordinator states they are; not observed from here. |
+| How the pinned server reports a soft-deleted entity | Both "omitted from `get_entities`" and "returned with `status.removed: true`" are treated as absent. Which one the server actually does is not observed from here. |
+| The pinned versions `acryl-datahub==1.6.0.15` and `mcp==1.28.1` | Declared as the deployment target and asserted by the test suite. **Not installed or imported in this session** — the suite runs without the `datahub` extra, so no code path through either package has been executed here. |
 | Structured properties as a writeback aspect | Not used. Gated behind a smoke test that has not run. |
 | Ingestion of the `traffic.` graph into the shared instance | **Planned, not applied.** `gtc-datahub-seed` produces a guarded, deterministic plan and recipe. No plan in this repository has been applied to a live instance. |
 | The `apply_plan` emitter path | Implemented against the DataHub SDK and guarded, but never executed. It requires the optional `.[datahub]` extra and live credentials. |
@@ -89,7 +96,21 @@ either pass or tell you exactly what differs.
 - The demo graph is a fixture of nine entities. It is not a production-scale catalogue.
 - A restore is only as complete as its capture. `gtc-datahub-capture` requires live credentials
   and fails closed if any allocated entity cannot be read, because restoring from a partial
-  capture would silently drop whatever was missed.
+  capture would silently drop whatever was missed. On a first-time seed the whole namespace is
+  legitimately missing; `--allow-absent` records that absence deliberately (ADR-016) and is the
+  only way absence enters a capture.
+- Restoring an initially-absent entity soft-deletes it. It does **not** hard delete, and it does
+  not remove a domain, tag, or lineage edge that something outside this project may also
+  reference. Soft delete is what coordinator ruling 4 permits; a shared instance keeps the tomb-
+  stone.
+- Absence after a restore is verified by re-reading the exact allocated URNs through MCP. If
+  `DATAHUB_MCP_URL` and `DATAHUB_TOKEN` are not both set, `gtc-datahub-restore --apply` fails
+  rather than reporting an unverified success — so a GMS-only host can apply a seed but cannot
+  complete an absent-state restore.
+- The absent-state contract has been exercised only against the protocol double. Whether the
+  pinned server reports a soft-deleted entity as `status.removed` (rather than omitting it) is
+  **not confirmed live**. Both are handled as absent, so either behaviour is correct here, but a
+  third behaviour would surface as a loud refusal on the first live restore.
 - Artifact digests from `gtc-archive-verify` differ between builds. The distributions are not
   bit-for-bit reproducible; the digests identify one specific build, they do not certify one.
 

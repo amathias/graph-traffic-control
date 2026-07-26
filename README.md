@@ -84,12 +84,32 @@ default; the application runs fixture-backed until they are supplied.
 | `gtc-api` | Serve the API and the judge console. |
 | `gtc-datahub-seed` | **Plan** the complete `traffic.` graph for DataHub — entities, schemas, ownership, domain, tag, marker, lineage. `--apply` needs live credentials. |
 | `gtc-datahub-reset` | Plan removal of *this project's* entities only. A global refresh is refused. |
-| `gtc-datahub-capture` / `gtc-datahub-restore` | Record the pre-seed state, and plan a return to it. |
+| `gtc-datahub-capture` | Record the pre-seed state of every allocated entity. `--allow-absent` records absence deliberately, for a first-time seed. |
+| `gtc-datahub-restore` | Plan a return to the captured state. Entities captured as absent are soft-deleted, and their absence is verified after `--apply`. |
 | `gtc-safety-scan` | Check git-tracked content for anything that must not be published. |
 | `gtc-archive-verify` | Build the distributions and prove they install and run in a clean environment. |
 
 The `gtc-datahub-*` commands **plan by default and never touch DataHub without `--apply`**. The
 instance is shared with four other submissions, so "run it and see" must not be the easy path.
+
+### First-time DataHub seeding
+
+Capture has to run before seed, so a shared instance can be left as found. On the **first** run
+there is nothing to read — the whole `traffic.` namespace is absent — so absence is what gets
+captured, and it has to be asked for:
+
+```bash
+gtc-datahub-capture --allow-absent   # records every allocated URN as absent
+gtc-datahub-seed --apply             # creates exactly those URNs
+# ... demo, writeback, receipts ...
+gtc-datahub-restore --apply          # soft-deletes them again, then re-reads and proves it
+```
+
+Without `--allow-absent`, a missing entity is still a hard failure. That is the point: "the
+namespace does not exist yet" and "half this project's rows have disappeared" look identical from
+the outside, and only the operator knows which one is true. Every check is exact — a capture that
+is partial, carries an extra or foreign URN, or lists a URN as both present and absent is refused
+rather than turned into a wrong restore. See ADR-016 in `docs/DECISIONS.md`.
 
 ## What it does
 

@@ -255,3 +255,74 @@ Two static guards stand in for a browser, since none was available: the inline s
 with `node --check` (skipped when node is absent), and every element id the script looks up must
 exist in the document. Both catch failures that would leave the console blank while the payload
 tests stayed green.
+
+## ADR-016: Absence is a captured value, not a gap
+
+**Status:** Accepted, extending ADR-014
+**Date:** 2026-07-25
+
+ADR-014 made seed, reset, and restore inert, guarded plans, and required capture to run before
+seed so a shared instance is left as found. That contract had a hole at exactly the moment it
+matters most: the **first** seed.
+
+On a first run the whole `traffic.` namespace is absent, so capture — which fails closed on any
+allocated entity it cannot read — refuses. The instructions therefore told an operator to run a
+command that cannot succeed, and the only ways past it were to skip capture (leaving nothing to
+restore to) or to seed first and capture the seeded state as if it were the original (recording
+this project's own rows as the state to return the shared instance to). Both leave the catalogue
+permanently dirty.
+
+The fix is to make **absence a value the capture records**, rather than a gap it tolerates:
+
+- `gtc-datahub-capture --allow-absent` records each allocated URN as `present` (with its full
+  state) or `absent`. Without the flag, a missing entity is still a hard failure — "the namespace
+  does not exist yet" and "half this project's rows have disappeared" look identical to a reader,
+  and only the operator knows which one is true, so the operator has to say.
+- A soft-deleted entity counts as absent. DataHub still returns it, so presence in a response is
+  not presence in the catalogue.
+- `restore` returns present entities to their captured values and initially-absent entities to a
+  **soft-deleted** state. That is the only honest reading of "leave it as you found it" for an
+  instance that never had these entities: delete what this project created.
+- After `--apply`, the initially-absent entities are **re-read and proved absent**. A restore
+  that soft-deleted nine of ten entities would otherwise report success while leaving the tenth
+  in a shared catalogue under this project's name. If MCP credentials are not available to
+  perform that re-read, the restore fails rather than reporting an unverified success.
+
+Every input to this is checked for exactness rather than containment, because each loose check is
+a specific wrong restore:
+
+| Refused | The restore it prevents |
+|---|---|
+| Partial capture | Leaves the entities it missed behind |
+| Extra URN (even in-namespace) | Writes to an entity this project never seeded |
+| Foreign URN | Writes into another submission's graph |
+| Same URN present *and* absent | No single end state to restore to |
+| Unrecognised `kind` / `capture_version` | Cannot distinguish "absent" from "not looked at" |
+
+Seed is held to the same standard: it must create **exactly** the manifest allocation, so the set
+that was captured as absent, the set that is created, and the set that is restored are provably
+the same set.
+
+**No global or search-based path exists anywhere in this.** Absence is only ever established by
+reading the exact allowlisted URNs one at a time; there is no wildcard, no search tool call, and
+no scope value other than `namespace` — restore now refuses any other scope for the same reason
+reset always has.
+
+## ADR-017: The DataHub optional dependencies are pinned exactly
+
+**Status:** Accepted
+**Date:** 2026-07-25
+
+`acryl-datahub` and `mcp` are pinned to `==1.6.0.15` and `==1.28.1` rather than to compatible
+ranges.
+
+Everything this project does with them fails closed on an unrecognised shape (ADR-012). That is
+the right behaviour, and it is precisely why a floating range is wrong here: the argument names,
+response envelopes, and aspect shapes were observed against these versions, so a patch release
+that moved a key would not degrade gracefully — it would turn a working deployment into a refusal
+at the first read, on a shared instance, during a demo.
+
+Pinning also makes the deployment reproducible in the one way that matters to the coordinator: the
+host installs the same two versions this project was built and reasoned about, and a version bump
+becomes a deliberate change with a smoke test attached rather than a side effect of when `pip`
+happened to run.
