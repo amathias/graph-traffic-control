@@ -60,8 +60,15 @@ Applying
 :func:`apply_plan` refuses to do anything without live credentials, and refuses again per
 operation via the same guard. The MCP tool set models description writes; the coordinator's
 integration ruling 3 allows the supported DataHub SDK/GraphQL path for aspects MCP does not
-model, which is why the plan is emitted in aspect form. **No plan in this repository has been
-applied to a live DataHub instance from this project chat** — see ``docs/LIMITATIONS.md``.
+model, which is why the plan is emitted in aspect form.
+
+Each operation is converted into a **typed** ``MetadataChangeProposalWrapper`` before it is
+emitted, and the whole plan is converted before the first write — see :func:`plan_to_mcps` and
+ADR-018. Handing the emitter a raw dict does not work at all: it dispatches on type and treats
+anything unrecognised as a ``MetadataChangeEvent``.
+
+**No plan in this repository has been applied to a live DataHub instance from this project chat**
+— see ``docs/LIMITATIONS.md``.
 """
 
 from __future__ import annotations
@@ -104,9 +111,53 @@ CAPTURE_VERSION = 2
 STATE_PRESENT = "present"
 STATE_ABSENT = "absent"
 
-#: Soft-delete payload. Shared by reset and by the absent branch of restore so that "returned to
-#: absent" and "removed by reset" are the same, inspectable operation.
-SOFT_DELETE_PAYLOAD = {"removed": True, "soft": True, "marker": MARKER_VALUE}
+#: Soft delete. Shared by reset and by the absent branch of restore so that "returned to absent"
+#: and "removed by reset" are the same, inspectable operation.
+#:
+#: A soft delete is an **UPSERT of the ``status`` aspect with ``removed: true``** — the form the
+#: pinned SDK itself uses (``stale_entity_removal_handler.py`` and
+#: ``GraphClient.soft_delete_entity`` in ``acryl-datahub==1.6.0.15``). It is emphatically *not*
+#: ``changeType: DELETE``: that removes the ``status`` aspect, which *un-deletes* a soft-deleted
+#: entity instead of deleting it. Nothing in this project ever hard-deletes; coordinator ruling 4
+#: forbids it.
+SOFT_DELETE_ASPECT = "status"
+SOFT_DELETE_CHANGE_TYPE = "UPSERT"
+SOFT_DELETE_PAYLOAD = {"removed": True}
+
+#: Namespace of DataHub's schema type records. The ``SchemaFieldDataType`` union is keyed by
+#: fully-qualified record name, so a bare type string is not a legal value for it.
+SCHEMA_TYPE_NAMESPACE = "com.linkedin.pegasus2avro.schema"
+
+#: Native column types mapped to the union member that represents them. Unknown types are
+#: **refused**, not defaulted: this table decides what a column claims to be in a shared
+#: catalogue, and ``NullType`` as a fallback would be a silent lie about every column whose type
+#: this project has not been taught. Same fail-closed rule as the context readers (ADR-012).
+SCHEMA_FIELD_TYPES: dict[str, str] = {
+    "bigint": "NumberType",
+    "bool": "BooleanType",
+    "boolean": "BooleanType",
+    "bytes": "BytesType",
+    "date": "DateType",
+    "datetime": "TimeType",
+    "decimal": "NumberType",
+    "double": "NumberType",
+    "float": "NumberType",
+    "int": "NumberType",
+    "integer": "NumberType",
+    "long": "NumberType",
+    "numeric": "NumberType",
+    "string": "StringType",
+    "text": "StringType",
+    "time": "TimeType",
+    "timestamp": "TimeType",
+    "varchar": "StringType",
+}
+
+#: Audit stamps are required fields on ``schemaMetadata`` and ``dashboardInfo``, but a wall-clock
+#: value would make every plan differ from the last and destroy the fingerprint that lets the
+#: coordinator diff one run against another. The epoch and a fixed actor keep plans deterministic.
+AUDIT_TIME = 0
+AUDIT_ACTOR = "urn:li:corpuser:datahub"
 
 DATASET_ASPECTS = (
     "datasetProperties",
@@ -116,6 +167,36 @@ DATASET_ASPECTS = (
     "globalTags",
     "upstreamLineage",
 )
+
+
+def _audit_stamp() -> dict[str, Any]:
+    return {"time": AUDIT_TIME, "actor": AUDIT_ACTOR}
+
+
+def _change_audit_stamps() -> dict[str, Any]:
+    return {"created": _audit_stamp(), "lastModified": _audit_stamp()}
+
+
+def _platform_schema() -> dict[str, Any]:
+    """The required ``platformSchema`` union member.
+
+    ``OtherSchema`` with an empty ``rawSchema``: the fixture graph carries no native DDL text, and
+    the field has no default, so it must be supplied explicitly rather than omitted.
+    """
+    return {f"{SCHEMA_TYPE_NAMESPACE}.OtherSchema": {"rawSchema": ""}}
+
+
+def _schema_field_type(native_type: str) -> dict[str, Any]:
+    """Map a native column type onto DataHub's ``SchemaFieldDataType`` union. Fails closed."""
+    member = SCHEMA_FIELD_TYPES.get(native_type.strip().lower())
+    if member is None:
+        raise PlanError(
+            f"Column type {native_type!r} has no mapping to a DataHub schema type. Add it to "
+            f"SCHEMA_FIELD_TYPES; it is refused rather than guessed, because a defaulted type "
+            f"would publish a wrong column shape to the shared catalogue. Known types: "
+            f"{', '.join(sorted(SCHEMA_FIELD_TYPES))}."
+        )
+    return {"type": {f"{SCHEMA_TYPE_NAMESPACE}.{member}": {}}}
 
 
 class PlanError(RuntimeError):
@@ -320,11 +401,16 @@ def _dataset_operations(
                     "platform": f"urn:li:dataPlatform:{platform}",
                     "version": 0,
                     "hash": "",
+                    # Required by the aspect and defaultless. Omitting it made every schema
+                    # operation unconstructible against the real SDK.
+                    "platformSchema": _platform_schema(),
+                    "created": _audit_stamp(),
+                    "lastModified": _audit_stamp(),
                     "fields": [
                         {
                             "fieldPath": field["path"],
                             "nativeDataType": field.get("type", "unknown"),
-                            "type": {"type": field.get("type", "unknown")},
+                            "type": _schema_field_type(field.get("type", "unknown")),
                             "nullable": True,
                         }
                         for field in sorted(fields, key=lambda f: f["path"])
@@ -371,6 +457,8 @@ def _dashboard_operations(
                 "description": entity.get("description", ""),
                 # A dashboard's lineage is its inputs, not an upstreamLineage aspect.
                 "datasets": inputs,
+                # Required by the aspect and defaultless, like schemaMetadata's stamps.
+                "lastModified": _change_audit_stamps(),
                 "customProperties": {
                     MARKER_KEY: MARKER_VALUE,
                     "criticality": entity.get("criticality", "UNKNOWN"),
@@ -506,9 +594,17 @@ def reset_plan(
 
 
 def _soft_delete_operation(urn: str) -> AspectOperation:
-    """Soft delete one entity. Stale-entity removal stays disabled, per coordinator ruling 4."""
+    """Soft delete one entity. Stale-entity removal stays disabled, per coordinator ruling 4.
+
+    ``UPSERT`` of ``status`` with ``removed: true`` — see :data:`SOFT_DELETE_PAYLOAD` for why this
+    is not a ``DELETE`` change type.
+    """
     return AspectOperation(
-        urn, _entity_type_of(urn), "status", "DELETE", dict(SOFT_DELETE_PAYLOAD)
+        urn,
+        _entity_type_of(urn),
+        SOFT_DELETE_ASPECT,
+        SOFT_DELETE_CHANGE_TYPE,
+        dict(SOFT_DELETE_PAYLOAD),
     )
 
 
@@ -716,6 +812,7 @@ def restore_plan(
     from graph_traffic_control.context.datahub import (
         extract_description,
         extract_domain,
+        extract_name,
         extract_owners,
         extract_tags,
     )
@@ -733,17 +830,22 @@ def restore_plan(
     for urn in sorted(entities):
         entity = entities[urn]
         entity_type = _entity_type_of(urn)
-        properties_aspect = (
-            "datasetProperties" if entity_type == "dataset" else "dashboardInfo"
-        )
+        description = extract_description(entity) or ""
+        if entity_type == "dataset":
+            properties_aspect = "datasetProperties"
+            properties_payload: dict[str, Any] = {"description": description}
+        else:
+            # dashboardInfo requires title and lastModified. A description-only payload could not
+            # be constructed as a typed aspect at all, so a restore of a captured dashboard would
+            # have failed at the SDK boundary.
+            properties_aspect = "dashboardInfo"
+            properties_payload = {
+                "title": extract_name(entity, urn),
+                "description": description,
+                "lastModified": _change_audit_stamps(),
+            }
         operations.append(
-            AspectOperation(
-                urn,
-                entity_type,
-                properties_aspect,
-                "UPSERT",
-                {"description": extract_description(entity) or ""},
-            )
+            AspectOperation(urn, entity_type, properties_aspect, "UPSERT", properties_payload)
         )
         operations.append(
             AspectOperation(
@@ -878,7 +980,128 @@ def load_capture(settings: Settings) -> dict[str, Any]:
     return capture
 
 
-def apply_plan(plan: DataHubPlan, namespace: Namespace, settings: Settings) -> dict[str, Any]:
+class PartialApplyError(PlanError):
+    """A plan was applied up to a point and then failed. Carries exactly how far it got.
+
+    A bare failure here would be untruthful in the most expensive way: the shared instance has
+    already been written to, and an operator who reads "seed failed" and assumes "nothing
+    happened" leaves this project's rows in a catalogue four other submissions share.
+    """
+
+    def __init__(
+        self, *, applied: int, total: int, operation: AspectOperation, cause: Exception
+    ) -> None:
+        self.applied = applied
+        self.total = total
+        self.operation = operation
+        self.cause = cause
+        super().__init__(
+            f"Apply failed after {applied} of {total} operations. The failing operation was "
+            f"{operation.change_type} {operation.aspect} on {operation.entity_urn}: "
+            f"{type(cause).__name__}: {cause}. "
+            f"The first {applied} operation(s) were accepted by DataHub and are still there — "
+            f"this is a partial write, not a no-op. Run `gtc-datahub-restore --apply` to return "
+            f"the allocation to its captured state before retrying."
+        )
+
+
+def _load_sdk() -> tuple[Any, Any, Any]:
+    """Import the pinned DataHub SDK pieces, or say exactly how to install them.
+
+    Isolated behind one function so the SDK boundary has a single seam that tests can double.
+    """
+    try:
+        from datahub.emitter.aspect import ASPECT_MAP
+        from datahub.emitter.mcp import MetadataChangeProposalWrapper
+        from datahub.emitter.serialization_helper import post_json_transform
+    except ImportError as exc:
+        raise PlanError(
+            "The DataHub SDK is not installed. Install the optional extra on the host: "
+            'pip install -e ".[datahub]"'
+        ) from exc
+    return ASPECT_MAP, MetadataChangeProposalWrapper, post_json_transform
+
+
+def _require_known_payload_keys(op: AspectOperation, aspect_cls: Any) -> None:
+    """Refuse a payload key the aspect does not declare.
+
+    ``from_obj`` **silently discards** keys it does not recognise, so a misspelled field would
+    otherwise be dropped on the floor and the operation would report success having written
+    nothing. Every read in this project fails closed on an unrecognised shape (ADR-012); the
+    write path has to do the same or the guarantee is one-sided.
+    """
+    declared = {field.name for field in aspect_cls.RECORD_SCHEMA.fields}
+    if unknown := sorted(set(op.payload) - declared):
+        raise PlanError(
+            f"Aspect {op.aspect!r} on {op.entity_urn!r} carries key(s) "
+            f"{', '.join(repr(k) for k in unknown)} that the aspect does not declare. The SDK "
+            f"would drop them silently and report success. Declared fields: "
+            f"{', '.join(sorted(declared))}."
+        )
+
+
+def operation_to_mcp(op: AspectOperation, sdk: tuple[Any, Any, Any] | None = None) -> Any:
+    """Convert one operation into a typed ``MetadataChangeProposalWrapper``.
+
+    This is the boundary that was wrong. The emitter dispatches on **type**: anything that is not
+    an MCP or an MCPW is treated as a ``MetadataChangeEvent`` and dereferenced as
+    ``item.proposedSnapshot``. A plain ``dict`` therefore never reached the network at all — it
+    raised ``AttributeError: 'dict' object has no attribute 'proposedSnapshot'`` inside
+    ``emit_mce``. Handing the emitter a typed aspect is the supported path, and it validates the
+    payload locally before a single byte is sent.
+    """
+    aspect_map, wrapper_cls, post_json_transform = sdk or _load_sdk()
+
+    aspect_cls = aspect_map.get(op.aspect)
+    if aspect_cls is None:
+        raise PlanError(
+            f"Aspect {op.aspect!r} on {op.entity_urn!r} is not a DataHub aspect known to the "
+            f"pinned SDK. Refusing to emit an aspect the server may not understand."
+        )
+    _require_known_payload_keys(op, aspect_cls)
+
+    try:
+        aspect = aspect_cls.from_obj(post_json_transform(op.payload))
+    except Exception as exc:
+        raise PlanError(
+            f"Aspect {op.aspect!r} on {op.entity_urn!r} could not be built as a typed "
+            f"{aspect_cls.__name__}: {type(exc).__name__}: {exc}. The plan payload does not match "
+            f"the aspect schema in the pinned SDK."
+        ) from exc
+
+    return wrapper_cls(
+        entityUrn=op.entity_urn,
+        entityType=op.entity_type,
+        changeType=op.change_type,
+        aspect=aspect,
+    )
+
+
+def plan_to_mcps(plan: DataHubPlan, sdk: tuple[Any, Any, Any] | None = None) -> list[Any]:
+    """Convert a **whole** plan before any of it is emitted.
+
+    Same reasoning as guarding the whole plan up front: a payload the SDK cannot build is found
+    while the operation count applied is still zero, rather than half way through a run against a
+    shared instance.
+    """
+    sdk = sdk or _load_sdk()
+    return [operation_to_mcp(op, sdk) for op in plan.operations]
+
+
+def _rest_emitter(settings: Settings) -> Any:  # pragma: no cover - requires the optional extra
+    from datahub.emitter.rest_emitter import DatahubRestEmitter
+
+    return DatahubRestEmitter(gms_server=settings.datahub_gms_url, token=settings.datahub_token)
+
+
+def apply_plan(
+    plan: DataHubPlan,
+    namespace: Namespace,
+    settings: Settings,
+    *,
+    emitter_factory: Any = None,
+    sdk: tuple[Any, Any, Any] | None = None,
+) -> dict[str, Any]:
     """Apply a plan to a live DataHub instance.
 
     Refuses without live credentials rather than pretending. Re-guards the plan immediately
@@ -886,6 +1109,10 @@ def apply_plan(plan: DataHubPlan, namespace: Namespace, settings: Settings) -> d
 
     The emitter is the supported DataHub SDK path (coordinator ruling 3, for aspects the MCP
     tool set does not model). It is an optional dependency: install ``.[datahub]`` on the host.
+
+    Order matters. Guard, then convert everything, then emit: the two failure modes that can be
+    detected without touching the network are both resolved while nothing has been written.
+    ``emitter_factory`` and ``sdk`` exist so the boundary can be exercised by a double.
     """
     guard_plan(plan, namespace, settings)
 
@@ -895,22 +1122,22 @@ def apply_plan(plan: DataHubPlan, namespace: Namespace, settings: Settings) -> d
             "never applied on a guess about where it would land."
         )
 
-    try:
-        from datahub.emitter.rest_emitter import DatahubRestEmitter
-    except ImportError as exc:  # pragma: no cover - depends on optional extra
-        raise PlanError(
-            "The DataHub SDK is not installed. Install the optional extra on the host: "
-            'pip install -e ".[datahub]"'
-        ) from exc
+    # Every conversion happens before the first emit, so a bad payload costs zero writes.
+    mcps = plan_to_mcps(plan, sdk)
 
-    emitter = DatahubRestEmitter(  # pragma: no cover - requires a live instance
-        gms_server=settings.datahub_gms_url, token=settings.datahub_token
-    )
+    emitter = (emitter_factory or _rest_emitter)(settings)
+    total = len(mcps)
     applied = 0
-    for op in plan.operations:  # pragma: no cover - requires a live instance
-        emitter.emit(op.as_dict())
+    for op, mcp in zip(plan.operations, mcps, strict=True):
+        try:
+            emitter.emit(mcp)
+        except Exception as exc:
+            raise PartialApplyError(
+                applied=applied, total=total, operation=op, cause=exc
+            ) from exc
         applied += 1
-    return {  # pragma: no cover - requires a live instance
+
+    return {
         "applied": applied,
         "fingerprint": plan.fingerprint(),
         "kind": plan.kind,

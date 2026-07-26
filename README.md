@@ -99,11 +99,16 @@ there is nothing to read — the whole `traffic.` namespace is absent — so abs
 captured, and it has to be asked for:
 
 ```bash
-gtc-datahub-capture --allow-absent   # records every allocated URN as absent
+gtc-datahub-capture --allow-absent   # writes APP_STATE_DIR/datahub/pre_seed_capture.json
 gtc-datahub-seed --apply             # creates exactly those URNs
 # ... demo, writeback, receipts ...
 gtc-datahub-restore --apply          # soft-deletes them again, then re-reads and proves it
 ```
+
+Each command names the file it wrote. Under `APP_STATE_DIR/datahub/`:
+`pre_seed_capture.json` (the recorded pre-seed state), `seed_plan.json`, `reset_plan.json`,
+`restore_plan.json`, and `ingestion_recipe.yaml`. Restore reads `pre_seed_capture.json` from that
+exact path and nowhere else, so it cannot be pointed at a capture from a different run.
 
 Without `--allow-absent`, a missing entity is still a hard failure. That is the point: "the
 namespace does not exist yet" and "half this project's rows have disappeared" look identical from

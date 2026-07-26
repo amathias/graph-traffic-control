@@ -29,6 +29,8 @@ from graph_traffic_control.demo.datahub_state import (
     DATASET_ASPECTS,
     MARKER_KEY,
     MARKER_VALUE,
+    SOFT_DELETE_ASPECT,
+    SOFT_DELETE_CHANGE_TYPE,
     AspectOperation,
     DataHubPlan,
     PlanError,
@@ -258,11 +260,17 @@ class TestReset:
     def test_reset_covers_the_whole_allocation(self, allocated, namespace, seeded_settings):
         plan = reset_plan(allocated, namespace, seeded_settings)
         assert set(plan.entity_urns) == set(allocated)
-        assert all(op.change_type == "DELETE" for op in plan.operations)
+        assert all(op.aspect == SOFT_DELETE_ASPECT for op in plan.operations)
 
     def test_reset_is_a_soft_delete(self, allocated, namespace, seeded_settings):
+        """An UPSERT of ``status`` with ``removed: true``.
+
+        Not ``changeType: DELETE`` — that removes the ``status`` aspect, which *un*-deletes a
+        soft-deleted entity. See ``test_datahub_sdk_boundary.py``.
+        """
         plan = reset_plan(allocated, namespace, seeded_settings)
-        assert all(op.payload["soft"] is True for op in plan.operations)
+        assert all(op.change_type == SOFT_DELETE_CHANGE_TYPE for op in plan.operations)
+        assert all(op.payload == {"removed": True} for op in plan.operations)
 
     def test_a_global_reset_is_refused(self, allocated, namespace, seeded_settings):
         """The one that would delete four other submissions."""
@@ -498,9 +506,9 @@ class TestAbsentStateCapture:
         capture = _capture_via_server(empty_state, namespace, allocated, allow_absent=True)
         plan = restore_plan(capture, namespace, seeded_settings, allocated)
 
-        deletes = {op.entity_urn for op in plan.operations if op.change_type == "DELETE"}
+        deletes = {op.entity_urn for op in plan.operations if op.aspect == SOFT_DELETE_ASPECT}
         assert deletes == set(allocated)
-        assert all(op.change_type == "DELETE" for op in plan.operations)
+        assert all(op.aspect == SOFT_DELETE_ASPECT for op in plan.operations)
 
     def test_the_absent_restore_is_a_soft_delete(
         self, empty_state, namespace, seeded_settings, allocated
@@ -508,8 +516,9 @@ class TestAbsentStateCapture:
         """Never a hard delete. Coordinator ruling 4 forbids destructive removal."""
         capture = _capture_via_server(empty_state, namespace, allocated, allow_absent=True)
         plan = restore_plan(capture, namespace, seeded_settings, allocated)
-        assert all(op.payload["soft"] is True for op in plan.operations)
-        assert all(op.aspect == "status" for op in plan.operations)
+        assert all(op.payload == {"removed": True} for op in plan.operations)
+        assert all(op.aspect == SOFT_DELETE_ASPECT for op in plan.operations)
+        assert all(op.change_type == SOFT_DELETE_CHANGE_TYPE for op in plan.operations)
 
     def test_a_mixed_restore_deletes_the_absent_and_upserts_the_present(
         self, allocated, namespace, seeded_settings
@@ -519,10 +528,12 @@ class TestAbsentStateCapture:
         capture = _capture_via_server(state, namespace, allocated, allow_absent=True)
         plan = restore_plan(capture, namespace, seeded_settings, allocated)
 
-        deleted = {op.entity_urn for op in plan.operations if op.change_type == "DELETE"}
-        upserted = {op.entity_urn for op in plan.operations if op.change_type == "UPSERT"}
+        deleted = {op.entity_urn for op in plan.operations if op.aspect == SOFT_DELETE_ASPECT}
+        restored = {
+            op.entity_urn for op in plan.operations if op.aspect != SOFT_DELETE_ASPECT
+        }
         assert deleted == {allocated[0]}
-        assert upserted == set(allocated) - {allocated[0]}
+        assert restored == set(allocated) - {allocated[0]}
 
     def test_the_absent_restore_is_deterministic(
         self, empty_state, namespace, seeded_settings, allocated
@@ -766,7 +777,8 @@ class TestCli:
             (seeded_settings.state_dir / "datahub" / "restore_plan.json").read_text("utf-8")
         )
         assert {op["entityUrn"] for op in body["operations"]} == set(allocated)
-        assert all(op["changeType"] == "DELETE" for op in body["operations"])
+        assert all(op["aspectName"] == SOFT_DELETE_ASPECT for op in body["operations"])
+        assert all(op["aspect"] == {"removed": True} for op in body["operations"])
 
     def test_restore_refuses_a_capture_that_does_not_match_the_manifest(
         self, seeded_settings, namespace, allocated, capsys

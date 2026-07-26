@@ -125,6 +125,34 @@ Straight from the `HACKATHON_RULES.md` scoring checklist:
 - [ ] The audit log and a receipt.
 - [ ] No secrets, hostnames, or copyrighted music.
 
+## If the demo is run against live DataHub
+
+The recorded demo is fixture-backed and needs none of this. A live run against the shared instance
+does, and it must happen in this order — capture first, always. A capture taken *after* a seed
+records this project's own rows as the state to return the instance to, and the shared catalogue
+never gets clean again.
+
+```bash
+gtc-datahub-capture --allow-absent   # first run: the traffic. namespace is absent, so record that
+gtc-datahub-seed --apply             # inspect seed_plan.json first; it is inert and fingerprinted
+# ... demo, writeback, receipts ...
+gtc-datahub-restore --apply          # soft-deletes them again, then re-reads and proves it
+```
+
+Every artifact lands under `APP_STATE_DIR/datahub/`:
+
+| File | What it is |
+|---|---|
+| `pre_seed_capture.json` | The pre-seed state of every allocated entity, each recorded `present` or `absent`. Restore reads this exact path and no other. |
+| `seed_plan.json` | The inert seed plan. Inspect before `--apply`; its fingerprint is printed by the command. |
+| `reset_plan.json` | Namespace-scoped soft-delete plan. |
+| `restore_plan.json` | The return-to-captured-state plan. |
+| `ingestion_recipe.yaml` | Namespace-scoped recipe, stale-entity removal disabled. |
+
+If `--apply` fails part way through, the error states how many operations were applied before the
+failure. That number is real: those operations are already in the shared instance. Run
+`gtc-datahub-restore --apply` before retrying.
+
 ## Honesty rules for the narration
 
 Non-negotiable, from `AGENTS.md` and the rules' truthful-claims requirement:

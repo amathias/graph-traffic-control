@@ -36,17 +36,20 @@ live EC2 host from this project chat.
 | Field | Current value |
 |---|---|
 | Status | `in progress` |
-| Milestone | Rejection corrected, deployment blockers cleared, product complete offline. **Live DataHub run outstanding.** |
+| Milestone | SDK-boundary blocker fixed and three latent defects it was hiding fixed with it. Product complete offline. **Live DataHub run outstanding.** |
 | Verified commit/artifact | See "Deployment candidate" below |
 | Build command | `python -m venv .venv && .venv/Scripts/python.exe -m pip install -e ".[dev]"` |
-| DataHub extra | `pip install -e ".[datahub]"` on the host — **pinned exactly** to `acryl-datahub==1.6.0.15` and `mcp==1.28.1` (ADR-017). Not installed or imported in this session. |
-| Test command | `.venv/Scripts/python.exe -m pytest` — **523 passed** in 203 s, no network required |
-| Coverage | `pytest --cov=graph_traffic_control` — **89%** (2615 statements, 290 missed). The largest gap remains `release/archive.py` at 30%: its end-to-end path builds distributions and creates a virtual environment, so it runs as the `gtc-archive-verify` release command rather than in the suite. |
+| DataHub extra | `pip install -e ".[datahub]"` on the host — **pinned exactly** to `acryl-datahub==1.6.0.15` and `mcp==1.28.1` (ADR-017). **Installed in a throwaway local venv this session** to verify the emitter contract against the real library; never pointed at any instance, and no network call was made with it. |
+| Test command | `.venv/Scripts/python.exe -m pytest` — **552 passed, 1 skipped** in 208 s, no network required. The skip is `test_datahub_sdk_pinned.py`, which needs the optional extra. |
+| Test command (with the extra) | `pytest` in a venv that also has `.[datahub]` — **563 passed, 0 skipped**. This is the host configuration. |
+| Coverage | `pytest --cov=graph_traffic_control` — **89%** (2678 statements, 295 missed). `demo/datahub_state.py` is now **96%**: the emitter boundary is executed by tests rather than excluded by a `pragma: no cover`, which is what let the blocker through. The largest gap remains `release/archive.py` at 30%: its end-to-end path builds distributions and creates a virtual environment, so it runs as the `gtc-archive-verify` release command rather than in the suite. |
 | Lint command | `.venv/Scripts/python.exe -m ruff check .` — clean |
 | Build/archive check | `gtc-archive-verify` — **8/8 pass**, including a clean-environment wheel install |
 | Safety scan | `gtc-safety-scan` — **0 blockers, 0 warnings** across 78 tracked files |
 | Seed / reset | `gtc-seed` / `gtc-reset` (local, offline, always safe) |
 | DataHub state | `gtc-datahub-seed`, `gtc-datahub-reset`, `gtc-datahub-capture`, `gtc-datahub-restore` — **plan-only by default**; `--apply` requires live credentials |
+| DataHub artifacts | Under `APP_STATE_DIR/datahub/`: `pre_seed_capture.json`, `seed_plan.json`, `reset_plan.json`, `restore_plan.json`, `ingestion_recipe.yaml`. These names are asserted by the suite against this document, the README, and the runbook, so they cannot drift from the docs again. |
+| Partial apply | If `--apply` fails part way, it raises with **how many operations were applied**, which one failed, and `gtc-datahub-restore --apply` as the recovery. "Seed failed" is never readable as "nothing happened". |
 | First-time seeding | `gtc-datahub-capture --allow-absent` records the deliberate absence of the exact allocation, seed creates exactly that set, and restore soft-deletes it back to absent and **re-reads to prove it** (ADR-016). Absence never enters a capture implicitly. |
 | Demo command | `gtc-demo [--export-examples examples]` |
 | Run command | `gtc-api` (uvicorn, `APP_HOST`:`APP_PORT`) |
@@ -58,18 +61,30 @@ live EC2 host from this project chat.
 | DataHub read | **Not verified live.** Implemented against the coordinator-observed contracts and tested against a strict localhost protocol double over real HTTP. No connection to the shared instance was made from this session. |
 | DataHub writeback | **Not verified live.** Reversible capture → write → re-read → restore, with verification and restoration tracked independently. **No live receipt exists.** |
 | DataHub ingestion | **Planned, never applied.** Deterministic guarded plans and recipe are produced; nothing has been written to the shared instance. |
+| DataHub emission | **Verified against the pinned SDK, offline.** All 103 operations across the seed, reset, and both restore plans construct as real typed aspects and serialise to the bytes the emitter would send. No emitter was ever connected. |
 | Blockers | Live DataHub verification requires SSM access, which this session was instructed not to use. Everything else is complete. |
-| Evidence produced | 523 passing tests; `examples/`; sanitized receipts under `APP_STATE_DIR/receipts`; `docs/DECISIONS.md` ADR-001..017; `docs/LIMITATIONS.md`; `docs/SUBMISSION.md`; `docs/DEMO_RUNBOOK.md` |
+| Evidence produced | 552 passing tests offline / 563 with the extra; `examples/`; sanitized receipts under `APP_STATE_DIR/receipts`; `docs/DECISIONS.md` ADR-001..018; `docs/LIMITATIONS.md`; `docs/SUBMISSION.md`; `docs/DEMO_RUNBOOK.md` |
 
 ## Deployment candidate
 
 | Field | Value |
 |---|---|
 | Branch | `main` |
-| Product candidate | `3ea18e3` — see the full SHA in the commit log. Both deployment blockers cleared. |
+| Product candidate | See "Product SHA" at the top of the SDK-boundary section below. Supersedes `3ea18e3`, which **cannot be applied to DataHub at all**. |
 | Tree state | Clean at that commit; `git status` empty |
 | Pushed to origin | `origin/main` |
-| Verified at that commit | **523 tests pass**, **89% coverage** (2615 statements, 290 missed), `ruff check` clean, `gtc-archive-verify` **8/8** (including a clean-environment wheel install), `gtc-safety-scan` **0 blockers / 0 warnings** across 78 tracked files, four-agent scenario runs end to end, judge workflow reproduces the result below, health and readiness answer 200 |
+| Verified at that commit | **552 tests pass, 1 skipped** offline and **563 pass, 0 skipped** with the pinned extra, **89% coverage** (2678 statements, 295 missed), `ruff check` clean, `gtc-archive-verify` **8/8** (including a clean-environment wheel install), `gtc-safety-scan` **0 blockers / 0 warnings** across 78 tracked files, four-agent scenario runs end to end, judge workflow reproduces the result below unchanged, health 200 and readiness 200 seeded |
+
+### The seed plan fingerprint has changed
+
+| | Value |
+|---|---|
+| Previous | `7f91a665a5e5495e` / `7f91a665a5e5495e27b267b5462ae46b78e93ffe7b0ece0af2cf09db5c4c525d` |
+| Current | `cd44112ebd42b7de` / `cd44112ebd42b7de6818f89a1005972a584f6dcbf94fde52882960a30c911ef6` |
+
+Still **49 operations over 9 entities** — the plan's size and coverage are unchanged. What changed
+is the aspect payloads, which were not constructible against the pinned SDK. Any recorded
+expectation of `7f91a665a5e5495e` is now stale, and it identified a plan that could not be emitted.
 
 Judge-workflow result at that commit, fixture-backed, no DataHub, read from `POST /api/demo/run`:
 
@@ -102,6 +117,56 @@ correctly returns 503, so the service will not report ready until credentials ar
 
 Artifact digests are reported by `gtc-archive-verify`, but the distributions are **not**
 bit-for-bit reproducible — a digest identifies one specific build, it does not certify one.
+
+## The SDK-boundary blocker, and the three defects it was hiding
+
+The coordinator's live gate found that `gtc-datahub-seed --apply` failed locally, before the first
+network operation: `apply_plan` called `DatahubRestEmitter.emit(op.as_dict())`, and the emitter
+dispatches on **type** — anything that is not an MCP or MCPW is treated as a `MetadataChangeEvent`
+and dereferenced as `item.proposedSnapshot`. A dict never reached the network at all.
+
+Confirmed, then fixed and re-verified, against the real `acryl-datahub==1.6.0.15` installed in a
+throwaway local venv. **No instance was contacted, no token was handled, and no AWS or EC2 access
+was used.**
+
+Operations are now converted to typed `MetadataChangeProposalWrapper` objects via
+`ASPECT_MAP[...].from_obj(...)`, and the **whole plan is converted before the first emit**, so a
+bad payload costs zero writes. ADR-018 has the full reasoning.
+
+Handing the SDK real aspect classes surfaced three defects that had never been executed, because a
+dict is not validated by anything:
+
+1. **`schemaMetadata` was unconstructible** — no `platformSchema` (a required, defaultless field),
+   and the field `type` was a bare string where a `SchemaFieldDataType` union is required. 8 of 49
+   seed operations.
+2. **`dashboardInfo` was unconstructible** — no `lastModified`. The restore path for a captured
+   dashboard was also missing `title`.
+3. **The soft delete was inverted.** It used `changeType: DELETE` on the `status` aspect, which
+   *removes* that aspect and therefore **un-deletes** a soft-deleted entity. Reset and the absent
+   branch of restore would have left this project's rows live in a shared catalogue while
+   reporting success. It is now an `UPSERT` of `status` with `removed: true`, the form the SDK
+   itself uses. Nothing this project emits is a destructive removal (coordinator ruling 4).
+
+Two hardening changes came with it:
+
+- **Unknown payload keys are refused.** `from_obj` silently discards keys it does not recognise, so
+  a misspelt field would be dropped and the operation would report success having written nothing.
+  Reads already fail closed on unrecognised shapes (ADR-012); the write path now does too.
+- **Partial applies are reported truthfully.** A mid-run failure raises with how many operations
+  were applied, which one failed, and the recovery command.
+
+**Why the suite missed it:** the emitting loop was marked `# pragma: no cover - requires a live
+instance`. A boundary excluded from coverage *and* untested is a boundary nobody has ever
+executed. `demo/datahub_state.py` is now 96% covered with the pragma gone from that path.
+
+### On the capture filename
+
+The gate also hit a stale expectation of the capture filename. The cause: `pre_seed_capture.json`
+existed only as a constant in the source and **was named in no document at all**, so an operator
+told to "capture, then inspect the capture" had to guess. It is now named in this document, the
+README, and the runbook, and `tests/test_datahub_artifact_names.py` asserts the constants against
+those documents in both directions, so a rename fails the suite instead of surfacing during a live
+run.
 
 ## What changed after the rejection
 
@@ -153,11 +218,17 @@ truthful "reads and writes real DataHub context" claim.
 3. **Capture first, and expect the `traffic.` namespace to be absent on the first run.** Run
    `gtc-datahub-capture`. If it refuses because entities are missing, that refusal is correct and
    is telling you this is a first-time seed: re-run `gtc-datahub-capture --allow-absent` to record
-   that absence deliberately. Then `gtc-datahub-seed --apply`. Inspect
+   that absence deliberately. The capture is written to
+   **`APP_STATE_DIR/datahub/pre_seed_capture.json`** — that exact filename, which restore reads
+   from that exact path and nowhere else. Then `gtc-datahub-seed --apply`. Inspect
    `APP_STATE_DIR/datahub/seed_plan.json` first — it is inert and deterministic, and its
    fingerprint is printed. Ingestion is namespace-scoped with stale-entity removal disabled.
    Do **not** seed before capturing: a capture taken after a seed records this project's own rows
    as the state to return the shared instance to, and the catalogue never gets clean again.
+
+   Artifact names are asserted by the suite against these documents, so they cannot drift again:
+   `pre_seed_capture.json`, `seed_plan.json`, `reset_plan.json`, `restore_plan.json`,
+   `ingestion_recipe.yaml`, all under `APP_STATE_DIR/datahub/`.
 4. Run one writeback and keep the receipt. Verify `verified: true` **and** `restored: true`, and
    confirm in the DataHub UI that the description returned to its original value.
 5. `gtc-datahub-restore --apply` at the end. If the capture recorded absent entities, restore
@@ -185,7 +256,8 @@ exactly what differs.
 
 | Coordinator gate | Status |
 |---|---|
-| Clean setup and tests pass | Verified — 523 passed, 89% coverage, `ruff check` clean |
+| Clean setup and tests pass | Verified — 552 passed / 1 skipped offline, 563 passed / 0 skipped with the pinned extra, 89% coverage, `ruff check` clean |
+| Plans can actually be emitted | Verified offline against the real `acryl-datahub==1.6.0.15` — all 103 operations across seed, reset, and both restore plans construct as typed aspects and serialise to the emitter's wire form (ADR-018). **No emitter was connected and no instance was contacted.** |
 | Distributions build and install cleanly | Verified — `gtc-archive-verify` 8/8, wheel installed and run in a fresh venv outside the source tree |
 | Demo seed and reset deterministic | Verified — repeated seed byte-identical; reset idempotent and fixture-preserving; DataHub plans byte-identical with a stable fingerprint |
 | Reads real context from shared DataHub | **Not verified** — implemented against the observed contracts, tested against a strict protocol double only |
@@ -219,6 +291,9 @@ exactly what differs.
   signals (ADR-013).
 - Deterministic, whole-plan-guarded DataHub seed/reset/capture/restore (ADR-014), with absence as
   an explicitly captured, exactly-checked, post-apply-verified state (ADR-016).
+- Emission through typed MCP wrappers built from the pinned SDK's own aspect classes, converted
+  whole-plan before the first write, with undeclared payload keys refused and partial applies
+  reported with a real applied count (ADR-018).
 - Self-contained judge console served from inside the package (ADR-015).
 - `gtc-safety-scan` and `gtc-archive-verify` as pre-publication gates.
 

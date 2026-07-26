@@ -326,3 +326,73 @@ Pinning also makes the deployment reproducible in the one way that matters to th
 host installs the same two versions this project was built and reasoned about, and a version bump
 becomes a deliberate change with a smoke test attached rather than a side effect of when `pip`
 happened to run.
+
+## ADR-018: Plans are emitted as typed MCP wrappers, and the payloads are real aspect shapes
+
+**Status:** Accepted
+**Date:** 2026-07-26
+
+`apply_plan` used to call `emitter.emit(op.as_dict())`. `DatahubRestEmitter.emit` dispatches on
+**type**: anything that is not a `MetadataChangeProposal` or `MetadataChangeProposalWrapper` is
+treated as a `MetadataChangeEvent` and dereferenced as `item.proposedSnapshot`
+(`rest_emitter.py:778-811` in `acryl-datahub==1.6.0.15`). A `dict` therefore never reached the
+network at all. Every `gtc-datahub-seed --apply` died locally with
+`AttributeError: 'dict' object has no attribute 'proposedSnapshot'`.
+
+Each operation is now converted through `ASPECT_MAP[aspect].from_obj(...)` into a typed aspect and
+wrapped in a `MetadataChangeProposalWrapper` — the supported SDK path under coordinator ruling 3.
+
+**Converting the whole plan happens before the first emit**, mirroring the whole-plan namespace
+guard: the two failure modes detectable without a network are both resolved while the applied
+count is still zero.
+
+### What the raw dict was hiding
+
+A dict is not validated by anything. Handing the SDK real aspect classes immediately surfaced
+three further defects that had never been executed:
+
+| Defect | Effect if it had reached a live instance |
+|---|---|
+| `schemaMetadata` had no `platformSchema`, and its field `type` was a bare string rather than a `SchemaFieldDataType` union | 8 of 49 seed operations unconstructible |
+| `dashboardInfo` had no `lastModified` | 1 more unconstructible; the restore path for a captured dashboard also lacked `title` |
+| Soft delete used `changeType: DELETE` on `status` | **Removes the `status` aspect, which un-deletes a soft-deleted entity.** Reset and the absent branch of restore would have left this project's rows live in a shared catalogue |
+
+A soft delete is now an `UPSERT` of `status` with `removed: true` — the form the SDK itself uses.
+Nothing this project emits is a destructive removal, as coordinator ruling 4 requires.
+
+Audit stamps are fixed at the epoch with a constant actor. They are required fields, and a
+wall-clock value would make every plan differ from the last and destroy the fingerprint the
+coordinator diffs runs against.
+
+**This changes the seed plan fingerprint**, because it changes what the plan says. The old
+fingerprint identified a plan that could not be emitted.
+
+### Unknown payload keys are refused
+
+`from_obj` **silently discards** keys it does not recognise — verified against the real classes: a
+misspelt field is dropped and the operation reports success having written nothing. Reads already
+fail closed on an unrecognised shape (ADR-012); `_require_known_payload_keys` makes the write path
+do the same, or the guarantee is one-sided.
+
+Column types map to DataHub schema types through an explicit table and an unknown type is
+**refused, not defaulted**. `NullType` as a fallback would be a silent lie about every column the
+project has not been taught.
+
+### Partial applies are reported truthfully
+
+A mid-run failure raises `PartialApplyError` carrying how many operations were applied, which one
+failed, and the recovery command. A bare failure would be untruthful in the most expensive way:
+the shared instance has already been written to, and an operator who reads "seed failed" and
+assumes "nothing happened" leaves this project's rows in a catalogue four submissions share.
+
+### Why the suite missed all of this
+
+The emitting loop was marked `# pragma: no cover - requires a live instance`. A boundary excluded
+from coverage *and* untested is a boundary nobody has ever executed, and a plan being inert,
+deterministic, and beautifully guarded says nothing about whether it can be emitted at all.
+
+`tests/test_datahub_sdk_boundary.py` covers it against a double whose behaviour was read out of
+the pinned SDK rather than its documentation. `tests/test_datahub_sdk_pinned.py` removes the
+remaining claim: with the optional extra installed, every operation of every plan this project can
+build is constructed as a real typed aspect and serialised to the bytes the emitter would send,
+and the double's own field sets are asserted against the real ones so it cannot drift.
