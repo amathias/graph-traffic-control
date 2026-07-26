@@ -35,6 +35,21 @@ Every read here therefore raises :class:`~graph_traffic_control.context.provider
 on a transport failure, a tool error, or a response whose shape is not the contract above. Absent
 *optional governance* values (an entity with no description, no owners, no domain) are legitimate
 and yield ``None``/empty — that is a value, not an unknown shape.
+
+Empty is not the same as unknown
+--------------------------------
+The distinction that matters is between a response that **succeeded and carried nothing** and one
+that **failed or arrived malformed**. The first is a value; the second must abort.
+
+``get_lineage`` returns ``downstreams.searchResults: null`` — not ``[]`` — for an entity with no
+downstream lineage. That is the live server's encoding of "no results", and it is accepted as
+exactly that, for ``null`` alone. Any other non-list still raises, so the allowance cannot widen
+into "anything falsy means no edges", and a tool error still arrives as ``McpError`` and still
+aborts the whole read.
+
+Separately, entity types that *cannot* have downstream lineage are not asked at all — see
+:data:`DOWNSTREAM_LINEAGE_URN_PREFIXES`. Not asking a question with no answer is not the same as
+tolerating its failure.
 """
 
 from __future__ import annotations
@@ -77,6 +92,22 @@ SCHEMA_FIELD_LIMIT = 500
 #: A dashboard has no columns, so asking for them and then tolerating the resulting error would
 #: reintroduce exactly the error-swallowing this module must not do.
 SCHEMA_BEARING_URN_PREFIXES = ("urn:li:dataset:",)
+
+#: URN prefixes whose entities can have **downstream** lineage. ``get_lineage`` with
+#: ``upstream: False`` is only called for these, for the same reason as
+#: :data:`SCHEMA_BEARING_URN_PREFIXES`: not asking a question that has no answer.
+#:
+#: A dashboard is a lineage sink — datasets feed it, nothing is fed by it. This project's own seed
+#: plan says so structurally: a dashboard's edges are its ``dashboardInfo.datasets`` *inputs*, and
+#: no operation this project can build ever names a dashboard as an upstream. The edge into a
+#: dashboard is therefore discovered when the **dataset** at the other end is queried, so skipping
+#: the dashboard's own downstream call loses no edge. That is what makes this a completeness
+#: strategy rather than a tolerated gap, and it is asserted directly rather than assumed:
+#: ``test_context_lineage_contract.py`` proves the edge set is identical either way.
+#:
+#: The live instance agrees. Asked for a dashboard's downstreams it answered
+#: ``searchResults: null``, because there is no downstream lineage for a dashboard to return.
+DOWNSTREAM_LINEAGE_URN_PREFIXES = ("urn:li:dataset:",)
 
 
 # --------------------------------------------------------------------------------------
@@ -176,11 +207,29 @@ def downstream_urns_from_lineage(payload: dict[str, Any]) -> list[str]:
             f"{TOOL_GET_LINEAGE} 'downstreams' is a {type(downstreams).__name__}; "
             "expected an object with 'searchResults'."
         )
-    results = downstreams.get("searchResults")
+    # An *absent* searchResults key is still a contract violation. The live instance sends the
+    # key and sets it to null; a response missing it altogether is a different shape that this
+    # project has never observed and will not guess at.
+    if "searchResults" not in downstreams:
+        raise McpContractError(
+            f"{TOOL_GET_LINEAGE} 'downstreams' has no 'searchResults' key "
+            f"(keys: {sorted(downstreams)})."
+        )
+    results = downstreams["searchResults"]
+    if results is None:
+        # The one empty variant the live instance actually emits. `searchResults` is a nullable
+        # list, and null is how the server says "this entity has no downstream lineage" — the
+        # answer a lineage sink gets. It is a *successful* response carrying no results, not a
+        # failure: a tool error still arrives as McpError and still aborts the read.
+        #
+        # Deliberately `is None` and nothing else. An empty string, a zero, or a dict here is
+        # still a contract violation and still raises, so this cannot widen into "anything falsy
+        # means no edges" — which is how a real read failure would become an empty graph.
+        return []
     if not isinstance(results, list):
         raise McpContractError(
             f"{TOOL_GET_LINEAGE} downstreams.searchResults is a {type(results).__name__}; "
-            "expected a list."
+            "expected a list or null."
         )
 
     urns: list[str] = []
@@ -410,6 +459,10 @@ class DataHubContextProvider:
 
     def _read_downstream_urns(self, urn: str) -> list[str]:
         """One hop downstream. Edges leaving the allocation are dropped, not followed."""
+        if not urn.startswith(DOWNSTREAM_LINEAGE_URN_PREFIXES):
+            # A lineage sink. Its inbound edge is found from the dataset at the other end, so
+            # nothing is lost by not asking — see DOWNSTREAM_LINEAGE_URN_PREFIXES.
+            return []
         try:
             payload = self._client.call_tool_structured(
                 TOOL_GET_LINEAGE,

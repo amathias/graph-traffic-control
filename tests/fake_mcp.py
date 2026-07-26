@@ -85,6 +85,10 @@ class FakeMcpState:
         self.tools: list[str] = list(DEFAULT_TOOLS)
         self.entities: dict[str, dict[str, Any]] = {}
         self.lineage: dict[str, list[str]] = {}
+        #: URNs whose downstream lineage answers ``searchResults: null`` instead of a list. Any
+        #: non-dataset URN does so by default, matching the live instance; adding a dataset here
+        #: forces the same shape onto it.
+        self.null_downstreams: set[str] = set()
         self.schema_fields: dict[str, list[dict[str, str]]] = {}
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.auth_headers: list[str | None] = []
@@ -270,6 +274,18 @@ def _require_arguments(name: str, arguments: dict[str, Any]) -> None:
         )
 
 
+def _answers_null_downstreams(state: FakeMcpState, urn: str) -> bool:
+    """Whether this URN's downstream lineage comes back as ``null`` rather than a list.
+
+    Mirrors the live instance: a dashboard is a lineage sink and its downstream query answers
+    ``searchResults: null``. Datasets answer with a list, empty or otherwise. Tests can force the
+    shape onto any URN via ``state.null_downstreams``.
+    """
+    if urn in state.null_downstreams:
+        return True
+    return not urn.startswith("urn:li:dataset:")
+
+
 def _dispatch(state: FakeMcpState, name: str, arguments: dict[str, Any]) -> Any:
     if name in state.malformed_tools:
         return state.malformed_tools[name]
@@ -292,6 +308,12 @@ def _dispatch(state: FakeMcpState, name: str, arguments: dict[str, Any]) -> Any:
             related = [u for u, downs in state.lineage.items() if urn in downs]
             key = "upstreams"
         else:
+            if _answers_null_downstreams(state, urn):
+                # What the live instance actually returns for a lineage sink: a successful
+                # response whose nullable searchResults list is null, not an empty list. The
+                # double emitted `[]` unconditionally, which is why the suite passed while
+                # `/api/graph` failed against the real server.
+                return {"downstreams": {"searchResults": None}}
             related = list(state.lineage.get(urn, []))
             key = "downstreams"
         limited = related[: int(arguments["max_results"])]

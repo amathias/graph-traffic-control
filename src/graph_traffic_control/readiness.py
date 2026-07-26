@@ -6,10 +6,15 @@ Two hard rules, both from the coordinator's live-milestone instruction:
    not a description. Writability is tested with ``os.access``, never with a real write.
 2. **A basic GMS health response is never sufficient.** In live mode the project is ready only
    after an *authenticated* check that every required MCP tool exists, that this project's tag and
-   domain both resolve, and that the **complete** allocated ``traffic.`` catalogue is present —
-   not a sample of it. An unauthenticated liveness ping proves a container is up, not that the
-   coordinator can do its job, and a partially ingested catalogue yields a partial graph that
-   reports fewer conflicts than really exist.
+   domain both resolve, that the **complete** allocated ``traffic.`` catalogue is present — not a
+   sample of it — and that **the graph snapshot actually builds**. An unauthenticated liveness
+   ping proves a container is up, not that the coordinator can do its job, and a partially
+   ingested catalogue yields a partial graph that reports fewer conflicts than really exist.
+3. **Readiness answers for the same snapshot ``/api/graph`` serves.** Presence checks alone once
+   reported 200 on a live instance whose ``/api/graph`` returned 503, because nothing in readiness
+   had ever read lineage. A readiness check that passes while the endpoint it vouches for fails
+   does not merely miss the problem — it certifies it. Both modes therefore build the real
+   snapshot through the same provider the API uses.
 
 Mode is derived, not configured: live mode requires both ``DATAHUB_MCP_URL`` and ``DATAHUB_TOKEN``.
 In fixture mode the service is ready only in a local or test environment, so a deployed instance
@@ -28,10 +33,13 @@ from graph_traffic_control.context.datahub import (
     REQUIRED_READ_TOOLS,
     REQUIRED_WRITE_TOOLS,
     TOOL_GET_ENTITIES,
+    DataHubContextProvider,
     present_urns_from_result,
 )
+from graph_traffic_control.context.fixture import FixtureContextProvider
 from graph_traffic_control.context.mcp_client import McpClient, McpError
 from graph_traffic_control.context.namespace import Namespace, NamespaceViolation
+from graph_traffic_control.context.provider import ContextReadError
 from graph_traffic_control.demo.seed import (
     SEED_MANIFEST,
     collect_urns,
@@ -71,7 +79,21 @@ def check_fixture_graph(settings: Settings, namespace: Namespace) -> dict[str, A
     except NamespaceViolation as exc:
         return {"ok": False, "detail": str(exc)}
 
-    return {"ok": True, "entities": len(urns), "edges": len(graph.get("edges", []))}
+    # Same reasoning as the live snapshot check below: validating that the fixture file parses
+    # and stays in-namespace is not the same as proving a snapshot can be built from it, and
+    # `/api/graph` serves the snapshot, not the file.
+    try:
+        snapshot = FixtureContextProvider(settings.fixture_root, namespace).snapshot()
+    except (ContextReadError, NamespaceViolation) as exc:
+        return {"ok": False, "detail": f"Fixture graph is not buildable into a snapshot: {exc}"}
+
+    return {
+        "ok": True,
+        "entities": len(urns),
+        "edges": len(graph.get("edges", [])),
+        "snapshot_entities": len(snapshot.entities),
+        "snapshot_edges": len(snapshot.edges),
+    }
 
 
 def check_state(settings: Settings) -> dict[str, Any]:
@@ -219,6 +241,32 @@ def check_datahub(
                     "from DataHub. Run the namespace-scoped seed before serving."
                 ),
             }
+
+        # The snapshot itself, through the same provider `/api/graph` uses.
+        #
+        # Every check above passed on the live instance while `/api/graph` returned 503: entities
+        # can all be present and individually readable, and the graph still be unbuildable,
+        # because nothing above had ever read *lineage*. Readiness that answers 200 while the one
+        # endpoint the coordinator depends on answers 503 is worse than no readiness check —
+        # it certifies the failure. So readiness now builds the real snapshot.
+        #
+        # Still strictly non-mutating: `snapshot()` only reads.
+        try:
+            snapshot = DataHubContextProvider(client, namespace, expected).snapshot()
+        except (ContextReadError, NamespaceViolation) as exc:
+            return {
+                **result,
+                "ok": False,
+                "status": "graph_unreadable",
+                "detail": (
+                    f"Every allocated entity is present, but the graph could not be built: {exc} "
+                    "`/api/graph` would return 503, so this instance is not ready."
+                ),
+            }
+
+        result["graph_entities"] = len(snapshot.entities)
+        result["graph_edges"] = len(snapshot.edges)
+        result["graph_fingerprint"] = snapshot.fingerprint()
 
         return {**result, "ok": True, "status": "verified"}
     finally:

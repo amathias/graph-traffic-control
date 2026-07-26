@@ -396,3 +396,72 @@ the pinned SDK rather than its documentation. `tests/test_datahub_sdk_pinned.py`
 remaining claim: with the optional extra installed, every operation of every plan this project can
 build is constructed as a real typed aspect and serialised to the bytes the emitter would send,
 and the double's own field sets are asserted against the real ones so it cannot drift.
+
+## ADR-019: Empty is not unknown, and a lineage sink is not asked
+
+**Status:** Accepted
+**Date:** 2026-07-26
+
+The first live run of the promoted build seeded successfully and then failed on `/api/graph`:
+
+```
+Could not read downstream lineage for urn:li:dashboard:(looker,traffic.dash_exec_revenue):
+get_lineage downstreams.searchResults is a NoneType; expected a list
+```
+
+All nine allocated entities were present and individually readable. One question that should not
+have been asked was answered in a shape the reader did not accept.
+
+### Two fixes, two separate claims
+
+**1. A dashboard is a lineage sink and is not asked for downstream lineage.**
+`DOWNSTREAM_LINEAGE_URN_PREFIXES` mirrors the existing `SCHEMA_BEARING_URN_PREFIXES` precedent:
+`list_schema_fields` was already skipped for entities with no columns, for exactly this reason.
+
+The completeness claim is that skipping loses no edge, and it is *proved*, not asserted. This
+project's own seed plan makes a dashboard's edges its `dashboardInfo.datasets` **inputs**; no
+operation this project can build ever names a dashboard as an upstream. The edge into the
+dashboard is therefore discovered when the dataset at the other end is queried. The test asserts
+the snapshot's edge set equals the fixture's edge set exactly, including that edge.
+
+**2. `searchResults: null` is a valid empty answer — and only `null`.**
+It is a *successful* response carrying no results, which is a value. A tool error still arrives as
+`McpError` and still aborts the whole read. Nothing here swallows a failure.
+
+The allowance is deliberately as narrow as the evidence:
+
+| Response | Result |
+|---|---|
+| `searchResults: [...]` | read normally |
+| `searchResults: []` | empty |
+| `searchResults: null` | empty — the observed live variant |
+| `searchResults` key absent | **raises** — a shape never observed, not guessed at |
+| `searchResults: ""`, `0`, `false`, `{}` | **raises** |
+
+The last two rows are the point. Had this been written as "falsy means no edges", a genuine read
+failure would become an empty graph — the exact ADR-012 failure this project was rejected for
+once already.
+
+### Why the suite was green while the live instance failed
+
+The protocol double returned `{"searchResults": []}` unconditionally. It could not produce the
+one shape the real server produces, so no test could have caught this. The double now answers
+`null` for lineage sinks exactly as the live instance does.
+
+A double is only worth what it faithfully reproduces. This is the same lesson as ADR-018, where
+the emitter boundary was doubled from documentation: **the double must be corrected from observed
+behaviour the moment observed behaviour contradicts it.**
+
+### Readiness must answer for the snapshot the API serves
+
+Readiness returned **200** while `/api/graph` returned **503**. Every check it ran passed, because
+none of them read lineage. That is worse than having no readiness check: it certified the outage.
+
+Readiness now builds the real snapshot through the same provider `/api/graph` uses, in both live
+and fixture mode, and reports the entity count, edge count, and fingerprint it built. A new
+`graph_unreadable` status distinguishes "the catalogue is incomplete" from "the catalogue is
+complete but the graph will not build", so an operator is not sent to re-seed a correctly seeded
+instance. It remains strictly non-mutating: `snapshot()` only reads.
+
+The invariant is now asserted directly — readiness may not be ready while `/api/graph` would 503,
+tested through the real HTTP surface in both directions.
