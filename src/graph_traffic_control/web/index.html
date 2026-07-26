@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graph Traffic Control — coordination console</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --line: #2b3440;
+    --text: #e6edf3; --muted: #8b96a5; --accent: #4c9aff;
+    --ok: #3fb950; --warn: #d29922; --bad: #f85149; --info: #a371f7;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f8fa; --panel: #ffffff; --panel-2: #f0f3f6; --line: #d8dee4;
+      --text: #1f2328; --muted: #59636e; --accent: #0969da;
+      --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e; --info: #8250df;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace; }
+  header {
+    padding: 18px 24px; border-bottom: 1px solid var(--line); background: var(--panel);
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: center;
+  }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: -0.01em; }
+  header .sub { color: var(--muted); font-size: 12.5px; }
+  main { padding: 20px 24px 60px; max-width: 1400px; margin: 0 auto; }
+  button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+    padding: 9px 16px; font-size: 13.5px; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: 0.55; cursor: progress; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 18px; margin-bottom: 18px;
+  }
+  .panel > h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); margin: 0 0 12px;
+  }
+  .grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+  .pill {
+    display: inline-block; padding: 2px 9px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 700; letter-spacing: 0.03em;
+  }
+  .s-COMMITTED { background: color-mix(in srgb, var(--ok) 22%, transparent); color: var(--ok); }
+  .s-BLOCKED   { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--warn); }
+  .s-ABORTED, .s-EXPIRED {
+    background: color-mix(in srgb, var(--bad) 20%, transparent); color: var(--bad);
+  }
+  .s-PREPARED  { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+  .s-SUBMITTED, .s-ANALYZING, .s-EXECUTING, .s-VALIDATING, .s-UNKNOWN {
+    background: color-mix(in srgb, var(--muted) 22%, transparent); color: var(--muted);
+  }
+  .agent {
+    border: 1px solid var(--line); border-radius: 9px; padding: 13px 15px;
+    background: var(--panel-2); margin-bottom: 12px;
+  }
+  .agent header {
+    all: unset; display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  }
+  .agent h3 { margin: 0; font-size: 14.5px; }
+  .agent .intent { color: var(--muted); font-size: 13px; margin: 4px 0 10px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; font-size: 12.5px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; word-break: break-all; }
+  .conflict {
+    border-left: 3px solid var(--warn); background: color-mix(in srgb, var(--warn) 9%, transparent);
+    padding: 9px 12px; margin-top: 10px; border-radius: 0 6px 6px 0; font-size: 12.5px;
+  }
+  .conflict .path { margin-top: 6px; color: var(--muted); font-size: 12px; }
+  .conflict .path b { color: var(--text); }
+  .verify { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .flag {
+    font-size: 11.5px; padding: 2px 8px; border-radius: 5px; border: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .flag.yes { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+  .flag.no  { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+  .flag.na  { color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; }
+  td.mono { word-break: break-all; }
+  .scroll { overflow-x: auto; }
+  .tall { max-height: 340px; overflow-y: auto; }
+  svg { width: 100%; height: auto; display: block; }
+  .node rect { fill: var(--panel-2); stroke: var(--line); }
+  .node.hot rect { stroke: var(--warn); stroke-width: 2; }
+  .node text { fill: var(--text); font-size: 11px; }
+  .edge { stroke: var(--line); stroke-width: 1.5; fill: none; }
+  .edge.hot { stroke: var(--warn); stroke-width: 2.5; }
+  .empty { color: var(--muted); font-style: italic; }
+  .banner {
+    border: 1px solid color-mix(in srgb, var(--info) 40%, var(--line));
+    background: color-mix(in srgb, var(--info) 10%, transparent);
+    border-radius: 8px; padding: 10px 14px; font-size: 12.5px; margin-bottom: 18px;
+  }
+  .err { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Graph Traffic Control</h1>
+    <div class="sub">Semantic two-phase commit for autonomous data agents, powered by DataHub lineage</div>
+  </div>
+  <div style="margin-left:auto; display:flex; gap:12px; align-items:center">
+    <span class="sub mono" id="source">—</span>
+    <button id="run">Run four-agent scenario</button>
+  </div>
+</header>
+
+<main>
+  <div class="banner" id="status">
+    Press <b>Run four-agent scenario</b>. Four agents submit structured proposals; the coordinator
+    expands their impact through DataHub lineage, blocks the pair that collide through a dependency
+    they never declared, lets the unrelated one commit in parallel, and fails the stale one closed.
+  </div>
+
+  <div class="panel" id="lineage-panel" hidden>
+    <h2>DataHub lineage — the conflict file locks cannot see</h2>
+    <div id="lineage"></div>
+  </div>
+
+  <div class="panel" id="agents-panel" hidden>
+    <h2>Agents, proposals, conflicts, approvals, and commits</h2>
+    <div id="agents"></div>
+  </div>
+
+  <div class="grid">
+    <div class="panel" id="leases-panel" hidden>
+      <h2>Leases</h2>
+      <div class="scroll"><table id="leases"></table></div>
+    </div>
+    <div class="panel" id="receipts-panel" hidden>
+      <h2>Evidence receipts</h2>
+      <div class="tall"><table id="receipts"></table></div>
+      <pre class="mono tall" id="receipt-body" style="margin-top:12px"></pre>
+    </div>
+  </div>
+
+  <div class="panel" id="events-panel" hidden>
+    <h2>Append-only audit log</h2>
+    <div class="scroll tall"><table id="events"></table></div>
+  </div>
+</main>
+
+<script>
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined) node.textContent = text;
+  return node;
+};
+// Short, readable label for a DataHub URN, e.g. traffic.fct_revenue.
+const shortName = (urn) => {
+  const tuple = urn.match(/\(([^)]*)\)/);
+  if (tuple) {
+    const parts = tuple[1].split(",");
+    return parts.length > 1 ? parts[1] : parts[0];
+  }
+  return urn.split(":").pop();
+};
+
+function flag(label, value) {
+  const state = value === null || value === undefined ? "na" : (value ? "yes" : "no");
+  const mark = state === "na" ? "–" : (value ? "✓" : "✗");
+  return el("span", `flag ${state}`, `${mark} ${label}`);
+}
+
+function renderLineage(graph, proposals) {
+  // Entities on the shortest path of any reported conflict are highlighted: that path is the
+  // evidence for a collision between proposals that share no declared URN.
+  const hotPath = new Set();
+  for (const p of proposals) {
+    for (const c of p.conflicts || []) (c.lineage_path || []).forEach((u) => hotPath.add(u));
+  }
+
+  // Layer nodes by longest distance from a source, so lineage reads left to right.
+  const nodes = graph.entities.map((e) => e.urn);
+  const incoming = new Map(nodes.map((n) => [n, []]));
+  for (const edge of graph.edges) {
+    if (incoming.has(edge.downstream)) incoming.get(edge.downstream).push(edge.upstream);
+  }
+  const depth = new Map();
+  const depthOf = (urn, seen = new Set()) => {
+    if (depth.has(urn)) return depth.get(urn);
+    if (seen.has(urn)) return 0;
+    seen.add(urn);
+    const parents = incoming.get(urn) || [];
+    const value = parents.length ? Math.max(...parents.map((p) => depthOf(p, seen) + 1)) : 0;
+    depth.set(urn, value);
+    return value;
+  };
+  nodes.forEach((n) => depthOf(n));
+
+  const columns = new Map();
+  for (const urn of nodes) {
+    const d = depth.get(urn);
+    if (!columns.has(d)) columns.set(d, []);
+    columns.get(d).push(urn);
+  }
+
+  const COL_W = 210, ROW_H = 58, BOX_W = 178, BOX_H = 34, PAD = 16;
+  const width = COL_W * columns.size + PAD;
+  const height = ROW_H * Math.max(...[...columns.values()].map((c) => c.length)) + PAD;
+  const pos = new Map();
+  for (const [d, urns] of columns) {
+    urns.sort();
+    urns.forEach((urn, i) => pos.set(urn, { x: PAD + d * COL_W, y: PAD + i * ROW_H }));
+  }
+
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "DataHub lineage graph for the traffic. allocation");
+
+  for (const edge of graph.edges) {
+    const a = pos.get(edge.upstream), b = pos.get(edge.downstream);
+    if (!a || !b) continue;
+    const hot = hotPath.has(edge.upstream) && hotPath.has(edge.downstream);
+    const path = document.createElementNS(ns, "path");
+    const x1 = a.x + BOX_W, y1 = a.y + BOX_H / 2, x2 = b.x, y2 = b.y + BOX_H / 2;
+    const mid = (x1 + x2) / 2;
+    path.setAttribute("d", `M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`);
+    path.setAttribute("class", hot ? "edge hot" : "edge");
+    svg.appendChild(path);
+  }
+
+  for (const [urn, p] of pos) {
+    const g = document.createElementNS(ns, "g");
+    g.setAttribute("class", hotPath.has(urn) ? "node hot" : "node");
+    const rect = document.createElementNS(ns, "rect");
+    rect.setAttribute("x", p.x); rect.setAttribute("y", p.y);
+    rect.setAttribute("width", BOX_W); rect.setAttribute("height", BOX_H);
+    rect.setAttribute("rx", 6);
+    const text = document.createElementNS(ns, "text");
+    text.setAttribute("x", p.x + 10); text.setAttribute("y", p.y + BOX_H / 2 + 4);
+    text.textContent = shortName(urn);
+    const title = document.createElementNS(ns, "title");
+    title.textContent = urn;
+    g.append(rect, text, title);
+    svg.appendChild(g);
+  }
+
+  $("lineage").replaceChildren(svg);
+  $("lineage-panel").hidden = false;
+}
+
+function renderProposal(p) {
+  const box = el("div", "agent");
+  const head = el("header");
+  head.append(
+    el("h3", null, `${p.agent.display_name} — ${p.agent.agent_id}`),
+    el("span", `pill s-${p.state}`, p.state)
+  );
+  box.append(head, el("div", "intent", p.intent));
+
+  const kv = el("dl", "kv");
+  const row = (key, value) => {
+    kv.append(el("dt", null, key), el("dd", "mono", value));
+  };
+  row("reads", p.read_set.map(shortName).join(", ") || "—");
+  row("writes", p.write_set.map(shortName).join(", ") || "—");
+  row("artifact", p.artifact_path);
+  if (p.impact) row("blast radius", String(p.impact.blast_radius));
+  row("approval", p.approval_required ? (p.approved_by || "REQUIRED — not granted") : "not required");
+  row("lease", p.lease_id || "—");
+  if (p.reason) row("outcome", p.reason);
+  box.append(kv);
+
+  for (const c of p.conflicts || []) {
+    const node = el("div", "conflict");
+    node.append(el("div", null, `${c.kind} → ${c.decision}: ${c.explanation}`));
+    if (c.lineage_path && c.lineage_path.length) {
+      const path = el("div", "path");
+      path.append(document.createTextNode("DataHub lineage path: "));
+      c.lineage_path.forEach((urn, i) => {
+        if (i) path.append(document.createTextNode(" → "));
+        path.append(el("b", null, shortName(urn)));
+      });
+      node.append(path);
+    }
+    box.append(node);
+  }
+
+  if (p.commit) {
+    const v = p.commit.verification;
+    const flags = el("div", "verify");
+    flags.append(
+      flag("artifact mutated", v.mutation_applied),
+      flag("mutation re-read", v.mutation_reread_verified),
+      flag("validated", v.validation_passed),
+      flag("writeback verified", v.writeback_attempted ? v.writeback_verified : null),
+      flag("writeback restored", v.writeback_attempted ? v.writeback_restored : null),
+      flag("rolled back", v.artifact_rolled_back),
+      flag("drift detected", p.commit.drift_detected)
+    );
+    box.append(flags);
+
+    const detail = el("dl", "kv");
+    detail.style.marginTop = "10px";
+    const drow = (key, value) => detail.append(el("dt", null, key), el("dd", "mono", value));
+    if (p.commit.artifact_diff) drow("diff", p.commit.artifact_diff);
+    drow("fingerprint at prepare", p.commit.fingerprint_at_prepare || "—");
+    drow("fingerprint at commit", p.commit.fingerprint_at_commit || "—");
+    if (v.receipts && v.receipts.length) drow("receipts", v.receipts.join(", "));
+    box.append(detail);
+  }
+  return box;
+}
+
+function renderTable(target, columns, rows) {
+  const table = $(target);
+  const thead = el("thead");
+  const hr = el("tr");
+  columns.forEach((c) => hr.append(el("th", null, c.label)));
+  thead.append(hr);
+  const tbody = el("tbody");
+  if (!rows.length) {
+    const tr = el("tr");
+    const td = el("td", "empty", "none");
+    td.colSpan = columns.length;
+    tr.append(td);
+    tbody.append(tr);
+  }
+  for (const row of rows) {
+    const tr = el("tr");
+    columns.forEach((c) => tr.append(c.render ? c.render(row) : el("td", "mono", c.get(row))));
+    tbody.append(tr);
+  }
+  table.replaceChildren(thead, tbody);
+}
+
+async function loadReceipt(name) {
+  const response = await fetch(`/api/receipts/${encodeURIComponent(name)}`);
+  const body = await response.json();
+  $("receipt-body").textContent = JSON.stringify(body, null, 2);
+}
+
+function render(data) {
+  $("source").textContent =
+    `context: ${data.context_source} · namespace: ${data.namespace.urn_prefix} · ` +
+    `graph ${data.graph.fingerprint}`;
+
+  renderLineage(data.graph, data.proposals);
+
+  $("agents").replaceChildren(...data.proposals.map(renderProposal));
+  $("agents-panel").hidden = false;
+
+  renderTable("leases",
+    [
+      { label: "lease", get: (l) => l.lease_id },
+      { label: "proposal", get: (l) => l.proposal_id },
+      { label: "urns", get: (l) => l.urns.map(shortName).join(", ") },
+      { label: "state", get: (l) => (l.released_at ? "released" : "active") },
+      { label: "seconds left", get: (l) => String(l.seconds_remaining ?? "—") },
+    ],
+    [...data.leases.active, ...data.leases.expired]
+  );
+  $("leases-panel").hidden = false;
+
+  renderTable("receipts",
+    [{
+      label: "receipt",
+      render: (name) => {
+        const td = el("td", "mono");
+        const link = el("button", null, name);
+        link.style.cssText =
+          "background:none;color:var(--accent);padding:0;font-weight:500;text-align:left";
+        link.addEventListener("click", () => loadReceipt(name));
+        td.append(link);
+        return td;
+      },
+    }],
+    data.receipts
+  );
+  $("receipts-panel").hidden = false;
+
+  renderTable("events",
+    [
+      { label: "#", get: (e) => String(e.sequence) },
+      { label: "proposal", get: (e) => e.proposal_id },
+      { label: "from", get: (e) => e.from_state || "—" },
+      {
+        label: "to",
+        render: (e) => {
+          const td = el("td");
+          td.append(el("span", `pill s-${e.to_state}`, e.to_state));
+          return td;
+        },
+      },
+      { label: "detail", get: (e) => e.detail || "" },
+    ],
+    data.events
+  );
+  $("events-panel").hidden = false;
+}
+
+$("run").addEventListener("click", async () => {
+  const button = $("run");
+  const status = $("status");
+  button.disabled = true;
+  status.className = "banner";
+  status.textContent = "Running the deterministic four-agent scenario…";
+  try {
+    const response = await fetch("/api/demo/run", { method: "POST" });
+    if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+    const data = await response.json();
+    render(data);
+    const committed = data.proposals.filter((p) => p.state === "COMMITTED").length;
+    const blocked = data.proposals.filter((p) => p.state === "BLOCKED").length;
+    const aborted = data.proposals.filter((p) => ["ABORTED", "EXPIRED"].includes(p.state)).length;
+    status.textContent =
+      `${data.proposals.length} proposals · ${committed} committed · ${blocked} blocked · ` +
+      `${aborted} failed closed · ${data.events.length} audited transitions. ` +
+      `Context read from: ${data.context_source}.`;
+  } catch (error) {
+    status.className = "banner err";
+    status.textContent = `Scenario failed: ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

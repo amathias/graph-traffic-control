@@ -32,7 +32,7 @@ from graph_traffic_control.context.namespace import Namespace
 from graph_traffic_control.demo.agents import proposal_a, proposal_b, proposal_c, proposal_d
 from graph_traffic_control.demo.seed import ARTIFACT_BY_URN, seed
 from graph_traffic_control.domain.clock import SystemClock
-from graph_traffic_control.domain.models import ChangeProposal, TransactionState
+from graph_traffic_control.domain.models import ChangeProposal, Conflict, TransactionState
 from graph_traffic_control.execute.targets import ArtifactExecutor
 from graph_traffic_control.receipts import ReceiptWriter
 from graph_traffic_control.txn.coordinator import Coordinator, PrepareOutcome
@@ -61,6 +61,15 @@ class ScenarioRunner:
             downstream_artifacts=ARTIFACT_BY_URN,
         )
         self.steps: list[dict[str, Any]] = []
+        # Kept so the judge UI can show what the coordinator decided, per proposal, without
+        # re-deriving it from the audit log.
+        self.submitted: dict[str, ChangeProposal] = {}
+        self.prepared: dict[str, PrepareOutcome] = {}
+        self.committed: dict[str, Any] = {}
+        # Conflicts accumulate across attempts rather than being replaced. A blocked proposal
+        # that is later re-analysed and proceeds must not lose the lineage evidence that
+        # blocked it the first time — that evidence is the point of the whole demo.
+        self.conflicts: dict[str, list[Conflict]] = {}
 
     def close(self) -> None:
         self.store.close()
@@ -73,6 +82,12 @@ class ScenarioRunner:
         self.steps.append({"step": step, **detail})
 
     def _write_proposal_receipt(self, proposal: ChangeProposal, outcome: PrepareOutcome) -> None:
+        self.submitted[proposal.proposal_id] = proposal
+        self.prepared[proposal.proposal_id] = outcome
+        seen = self.conflicts.setdefault(proposal.proposal_id, [])
+        for conflict in outcome.conflicts:
+            if conflict not in seen:
+                seen.append(conflict)
         self.receipts.proposal_receipt(
             proposal=proposal,
             impact=outcome.impact,
@@ -105,7 +120,113 @@ class ScenarioRunner:
             abort_reason=result.reason or None,
         )
         result.verification.receipts.append(receipt_path.name)
+        self.committed[proposal.proposal_id] = result
         return result
+
+    # -- judge-facing assembly -----------------------------------------------------------
+
+    def judge_payload(self) -> dict[str, Any]:
+        """Everything the judge UI renders, assembled from what the coordinator decided.
+
+        Deliberately assembled from the coordinator's own outcomes and the append-only audit
+        log, not re-derived or prettified. What a judge sees is what the coordinator recorded.
+        """
+        snapshot = self.provider.snapshot()
+        manager = self.coordinator.leases
+
+        proposals = []
+        for proposal_id, proposal in self.submitted.items():
+            prepare = self.prepared.get(proposal_id)
+            commit = self.committed.get(proposal_id)
+            state = self.store.get_state(proposal_id)
+            # Approval is recorded on the *persisted* token. The in-memory token returned by
+            # prepare predates the approval, so reading it would report every high-blast-radius
+            # change as unapproved even after a human approved it.
+            token = (
+                self.coordinator.token(prepare.token.token)
+                if prepare and prepare.token
+                else None
+            )
+            proposals.append(
+                {
+                    "proposal_id": proposal_id,
+                    "agent": proposal.agent.model_dump(mode="json"),
+                    "intent": proposal.intent,
+                    "state": state.value if state else "UNKNOWN",
+                    "read_set": proposal.read_set,
+                    "write_set": proposal.write_set,
+                    "expected_versions": proposal.expected_versions,
+                    "risk": proposal.risk.model_dump(mode="json"),
+                    "evidence": proposal.evidence,
+                    "artifact_path": proposal.action.artifact_path,
+                    "impact": prepare.impact.model_dump(mode="json") if prepare else None,
+                    "conflicts": [
+                        c.model_dump(mode="json")
+                        for c in self.conflicts.get(proposal_id, [])
+                    ],
+                    "reason": (commit.reason if commit else (prepare.reason if prepare else "")),
+                    "approval_required": token.approval_required if token else False,
+                    "approved_by": token.approved_by if token else None,
+                    "lease_id": prepare.lease.lease_id if prepare and prepare.lease else None,
+                    "commit": (
+                        {
+                            "state": commit.state.value,
+                            "artifact_diff": commit.artifact_diff,
+                            "validation": commit.validation,
+                            "verification": commit.verification.model_dump(mode="json"),
+                            "writeback": (
+                                commit.writeback.model_dump(mode="json")
+                                if commit.writeback
+                                else None
+                            ),
+                            "drift_detected": commit.drift_detected,
+                            "fingerprint_at_prepare": commit.prepare_fingerprint,
+                            "fingerprint_at_commit": commit.commit_fingerprint,
+                        }
+                        if commit
+                        else None
+                    ),
+                }
+            )
+
+        receipts_dir = self.receipts.directory
+        receipts = (
+            sorted(p.name for p in receipts_dir.glob("*.json"))
+            if receipts_dir.is_dir()
+            else []
+        )
+
+        return {
+            "context_source": self.provider.source,
+            "namespace": {
+                "urn_prefix": self.namespace.urn_prefix,
+                "domain": self.namespace.domain,
+                "tag": self.namespace.project_tag,
+            },
+            "graph": {
+                "fingerprint": snapshot.fingerprint(),
+                "entities": [e.model_dump(mode="json") for e in snapshot.entities.values()],
+                "edges": [e.model_dump(mode="json") for e in snapshot.edges],
+            },
+            "agents": [
+                proposal.agent.model_dump(mode="json") for proposal in self.submitted.values()
+            ],
+            "proposals": proposals,
+            "leases": {
+                "now": manager.now().isoformat(),
+                "active": [
+                    {
+                        **lease.model_dump(mode="json"),
+                        "seconds_remaining": manager.seconds_remaining(lease.lease_id),
+                    }
+                    for lease in manager.active_leases()
+                ],
+                "expired": [lease.model_dump(mode="json") for lease in manager.expired_leases()],
+            },
+            "events": [event.model_dump(mode="json") for event in self.store.list_events()],
+            "receipts": receipts,
+            "steps": self.steps,
+        }
 
     def run(self, echo=print) -> dict[str, Any]:  # noqa: T202 - CLI output is the point
         versions = self.current_versions()

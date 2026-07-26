@@ -20,10 +20,12 @@ restore cycle in :mod:`graph_traffic_control.writeback`.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from graph_traffic_control import __version__
 from graph_traffic_control import readiness as readiness_module
@@ -31,14 +33,20 @@ from graph_traffic_control.config import Settings, get_settings
 from graph_traffic_control.context.datahub import DataHubContextProvider
 from graph_traffic_control.context.fixture import FixtureContextProvider
 from graph_traffic_control.context.mcp_client import McpClient
-from graph_traffic_control.context.namespace import Namespace, NamespaceViolation
+from graph_traffic_control.context.namespace import (
+    Namespace,
+    NamespaceViolation,
+    require_contained_path,
+)
 from graph_traffic_control.context.provider import ContextProvider, ContextReadError
-from graph_traffic_control.demo.seed import ARTIFACT_BY_URN, load_manifest
+from graph_traffic_control.demo.reset import reset
+from graph_traffic_control.demo.scenario import ScenarioRunner
+from graph_traffic_control.demo.seed import ARTIFACT_BY_URN, load_manifest, seed
 from graph_traffic_control.domain.clock import SystemClock
 from graph_traffic_control.domain.models import ChangeProposal
 from graph_traffic_control.domain.states import IllegalTransition
 from graph_traffic_control.execute.targets import ArtifactExecutor
-from graph_traffic_control.receipts import ReceiptWriter
+from graph_traffic_control.receipts import RECEIPTS_DIRNAME, ReceiptWriter
 from graph_traffic_control.txn.coordinator import Coordinator, CoordinatorError
 from graph_traffic_control.txn.store import TransactionStore
 from graph_traffic_control.writeback.datahub import ReversibleDescriptionWriteback
@@ -50,6 +58,11 @@ app = FastAPI(
 )
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+
+#: The judge console ships inside the package. It is a single self-contained document with no
+#: external stylesheet, script, or font, so it renders identically offline and on a locked-down
+#: reviewer machine.
+UI_INDEX = Path(__file__).resolve().parent / "web" / "index.html"
 
 
 def allocated_urns(settings: Settings) -> list[str]:
@@ -306,6 +319,71 @@ def list_leases(runtime: RuntimeDep) -> dict[str, Any]:
         ],
         "expired": [lease.model_dump(mode="json") for lease in manager.expired_leases()],
     }
+
+
+# --------------------------------------------------------------------------------------
+# Judge-facing UI and evidence
+# --------------------------------------------------------------------------------------
+
+#: The judge scenario runs in its own state directory. It resets and reseeds on every run so a
+#: judge can press the button repeatedly and see the same story; doing that to the live state
+#: directory would destroy any proposals submitted through the API alongside it.
+JUDGE_STATE_DIRNAME = "judge"
+
+
+@app.get("/", response_class=HTMLResponse)
+def judge_ui() -> HTMLResponse:
+    """The project-owned judge console. Self-contained: no external assets are fetched."""
+    return HTMLResponse(UI_INDEX.read_text(encoding="utf-8"))
+
+
+@app.post("/api/demo/run")
+def run_demo(settings: SettingsDep) -> dict[str, Any]:
+    """Run the deterministic four-agent scenario and return everything a judge needs to see.
+
+    Deterministic by construction: fixed submission order, explicit barriers, injected clock.
+    ``AGENTS.md`` forbids letting the demo depend on uncontrolled concurrent timing.
+    """
+    judge_dir = settings.state_dir / JUDGE_STATE_DIRNAME
+    judge_settings = settings.model_copy(update={"app_state_dir": judge_dir})
+
+    reset(judge_settings)
+    seed(judge_settings)
+
+    runner = ScenarioRunner(judge_settings)
+    try:
+        runner.run(echo=lambda *_args, **_kwargs: None)
+        return runner.judge_payload()
+    finally:
+        runner.close()
+
+
+@app.get("/api/receipts")
+def list_receipts(settings: SettingsDep) -> dict[str, Any]:
+    """Index of receipt evidence written by the most recent judge scenario run."""
+    directory = (
+        settings.state_dir / JUDGE_STATE_DIRNAME / RECEIPTS_DIRNAME
+    )
+    if not directory.is_dir():
+        return {"receipts": []}
+    return {"receipts": sorted(p.name for p in directory.glob("*.json"))}
+
+
+@app.get("/api/receipts/{name}")
+def read_receipt(name: str, settings: SettingsDep) -> dict[str, Any]:
+    """One receipt, by filename.
+
+    The name is resolved and proven to live inside the receipts directory before it is read, so
+    a crafted name cannot walk out of it and serve an arbitrary file over HTTP.
+    """
+    directory = settings.state_dir / JUDGE_STATE_DIRNAME / RECEIPTS_DIRNAME
+    try:
+        path = require_contained_path(directory / name, directory, operation="Receipt read")
+    except NamespaceViolation as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    if path.suffix != ".json" or not path.is_file():
+        raise HTTPException(status_code=404, detail="Unknown receipt")
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def run() -> None:
