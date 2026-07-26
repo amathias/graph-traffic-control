@@ -54,11 +54,17 @@ python -m venv .venv
 
 pytest                 # full suite, no network required
 gtc-seed               # materialise deterministic demo state and SQL artifacts
-gtc-demo               # run the four-agent coordination scenario end to end
 gtc-api                # serve on http://127.0.0.1:8105
 ```
 
-Then:
+Then open **<http://127.0.0.1:8105/>** and press **Run four-agent scenario**.
+
+That is the whole demo. The console shows the agents, their proposals, the DataHub lineage path
+that proves the hidden conflict, leases, approvals, commits with every verification flag,
+rollback, the append-only audit log, and the receipts behind it — with no DataHub instance, cloud
+account, or paid service required. It states on screen which context source it read from.
+
+Prefer a terminal? `gtc-demo` runs the same scenario and prints the trace.
 
 ```bash
 curl http://127.0.0.1:8105/api/health
@@ -66,11 +72,24 @@ curl http://127.0.0.1:8105/api/readiness
 curl http://127.0.0.1:8105/api/graph
 ```
 
-`gtc-reset` clears demo state. It is scoped to this project's state directory and cannot delete
-version-controlled fixtures or another project's DataHub entities.
-
 Copy `.env.example` to `.env` to override defaults. DataHub connection variables are blank by
 default; the application runs fixture-backed until they are supplied.
+
+### All commands
+
+| Command | What it does |
+|---|---|
+| `gtc-seed` / `gtc-reset` | Materialise or clear local demo state. Scoped to this project's state directory; cannot delete version-controlled fixtures. |
+| `gtc-demo` | Run the four-agent scenario in the terminal. |
+| `gtc-api` | Serve the API and the judge console. |
+| `gtc-datahub-seed` | **Plan** the complete `traffic.` graph for DataHub — entities, schemas, ownership, domain, tag, marker, lineage. `--apply` needs live credentials. |
+| `gtc-datahub-reset` | Plan removal of *this project's* entities only. A global refresh is refused. |
+| `gtc-datahub-capture` / `gtc-datahub-restore` | Record the pre-seed state, and plan a return to it. |
+| `gtc-safety-scan` | Check git-tracked content for anything that must not be published. |
+| `gtc-archive-verify` | Build the distributions and prove they install and run in a clean environment. |
+
+The `gtc-datahub-*` commands **plan by default and never touch DataHub without `--apply`**. The
+instance is shared with four other submissions, so "run it and see" must not be the easy path.
 
 ## What it does
 
@@ -100,19 +119,35 @@ file-, branch-, or worktree-based coordinator says these are safe. They are not:
 that path as the conflict evidence. Meanwhile Agent C's support-branch change is lineage-disjoint
 and commits in parallel rather than being serialised behind either of them.
 
+### Two things worth knowing about how it fails
+
+**Reads fail closed.** An MCP error or an unrecognised response shape aborts the read and says
+so. It never becomes an empty graph — an empty graph is indistinguishable from a graph with no
+conflicts, so degrading to one would silently turn "the coordinator cannot see the graph" into
+"nothing conflicts, commit away".
+
+**`COMMITTED` means proved, not attempted.** The artifact is re-read from disk and the DataHub
+writeback is re-read from DataHub before a proposal is marked committed. Mutation, mutation
+re-read, validation, writeback verification, writeback restoration, rollback, and receipts are
+tracked as seven independent signals, and every commit receipt records which of them were true.
+
 ## Current status
 
-The proposal → lease → commit vertical slice is implemented and tested: conflict matrix,
-two-phase commit with pre-commit graph recheck, expiring leases, real artifact mutation with
-rollback, reversible writeback, sanitized receipts, and strong non-mutating readiness.
+Implemented and tested: the conflict matrix, two-phase commit with pre-commit graph recheck,
+expiring leases, real artifact mutation with rollback, verified reversible writeback, sanitized
+receipts, non-mutating readiness over the complete catalogue, deterministic namespace-guarded
+DataHub seed/reset/capture/restore planning, the judge console, release safety scanning, and
+archive verification.
 
-**No connection to the shared DataHub instance has been made.** The MCP client, DataHub context
-provider, and writeback are exercised against a localhost protocol test double over real HTTP —
-not against DataHub Core v1.6.0. There are no live receipts, and this README claims none. See
-[LIMITATIONS.md](./docs/LIMITATIONS.md) for the precise line between what has been executed and
-what has not.
+**No connection to the shared DataHub instance has been made from this workspace.** The MCP
+client, context provider, and writeback are exercised against a strict localhost protocol double
+over real HTTP — not against DataHub Core v1.6.0. The DataHub seed has been *planned*, never
+applied. There are no live receipts, and this README claims none.
 
-Still to build: the coordinator UI, the recorded demo, and the live DataHub run.
+[LIMITATIONS.md](./docs/LIMITATIONS.md) is the authoritative line between what has been executed
+and what has not. Everything produced against the protocol double is labelled **simulated**.
+
+Remaining: the live DataHub run and the recorded demo.
 
 ## Workspace map
 
@@ -120,6 +155,9 @@ Still to build: the coordinator UI, the recorded demo, and the live DataHub run.
 - [Build plan](./BUILD_PLAN.md)
 - [Implementation plan](./IMPLEMENTATION_PLAN.md)
 - [Architecture decisions](./docs/DECISIONS.md)
+- [Limitations and evidence status](./docs/LIMITATIONS.md)
+- [Submission copy](./docs/SUBMISSION.md)
+- [Demo runbook](./docs/DEMO_RUNBOOK.md)
 - [Demo and submission](./DEMO_AND_SUBMISSION.md)
 - [Hackathon rules](./HACKATHON_RULES.md)
 - [AI builder instructions](./AGENTS.md)

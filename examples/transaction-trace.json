@@ -3,7 +3,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-a",
-      "at": "2026-07-25T21:01:14.767372Z",
+      "at": "2026-07-26T00:23:16.036514Z",
       "detail": "submitted",
       "evidence": {},
       "from_state": null,
@@ -14,7 +14,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-a",
-      "at": "2026-07-25T21:01:14.936451Z",
+      "at": "2026-07-26T00:23:16.115242Z",
       "detail": "analyzing",
       "evidence": {},
       "from_state": "SUBMITTED",
@@ -25,14 +25,14 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-a",
-      "at": "2026-07-25T21:01:15.165363Z",
+      "at": "2026-07-26T00:23:16.261835Z",
       "detail": "prepared",
       "evidence": {
         "approval_required": "true",
         "blast_radius": "2",
         "context_source": "fixture",
-        "lease_id": "lease-e850db8cee32",
-        "subgraph_fingerprint": "a4509bdbd64fd30b"
+        "lease_id": "lease-6d6328bacf22",
+        "subgraph_fingerprint": "c1e0841451f0a093"
       },
       "from_state": "ANALYZING",
       "proposal_id": "prop-a-rename-revenue",
@@ -42,7 +42,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-b",
-      "at": "2026-07-25T21:01:15.253984Z",
+      "at": "2026-07-26T00:23:16.341864Z",
       "detail": "submitted",
       "evidence": {},
       "from_state": null,
@@ -53,7 +53,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-b",
-      "at": "2026-07-25T21:01:15.388934Z",
+      "at": "2026-07-26T00:23:16.419637Z",
       "detail": "analyzing",
       "evidence": {},
       "from_state": "SUBMITTED",
@@ -64,7 +64,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-b",
-      "at": "2026-07-25T21:01:15.471244Z",
+      "at": "2026-07-26T00:23:16.499248Z",
       "detail": "prop-a-rename-revenue writes urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD), which prop-b-net-revenue-metric reads. The two must be ordered.",
       "evidence": {
         "conflict_decision": "ORDER",
@@ -80,7 +80,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-c",
-      "at": "2026-07-25T21:01:15.561093Z",
+      "at": "2026-07-26T00:23:16.578509Z",
       "detail": "submitted",
       "evidence": {},
       "from_state": null,
@@ -91,7 +91,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-c",
-      "at": "2026-07-25T21:01:15.628829Z",
+      "at": "2026-07-26T00:23:16.657156Z",
       "detail": "analyzing",
       "evidence": {},
       "from_state": "SUBMITTED",
@@ -102,14 +102,14 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-c",
-      "at": "2026-07-25T21:01:15.799426Z",
+      "at": "2026-07-26T00:23:16.814649Z",
       "detail": "prepared",
       "evidence": {
         "approval_required": "false",
         "blast_radius": "0",
         "context_source": "fixture",
-        "lease_id": "lease-155444ed0566",
-        "subgraph_fingerprint": "5dcc49fa7acbabd0"
+        "lease_id": "lease-9b44ad2f993a",
+        "subgraph_fingerprint": "59f20c6ba7df2bfb"
       },
       "from_state": "ANALYZING",
       "proposal_id": "prop-c-support-sla",
@@ -119,7 +119,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-c",
-      "at": "2026-07-25T21:01:15.898620Z",
+      "at": "2026-07-26T00:23:16.893586Z",
       "detail": "executing",
       "evidence": {},
       "from_state": "PREPARED",
@@ -130,7 +130,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-c",
-      "at": "2026-07-25T21:01:15.981258Z",
+      "at": "2026-07-26T00:23:16.983439Z",
       "detail": "validating",
       "evidence": {},
       "from_state": "EXECUTING",
@@ -141,7 +141,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-c",
-      "at": "2026-07-25T21:01:16.079722Z",
+      "at": "2026-07-26T00:23:17.074169Z",
       "detail": "committed",
       "evidence": {
         "artifact": "fct_support_sla.sql",
@@ -149,7 +149,8 @@
         "context_source": "fixture",
         "diff": "8 line(s) changed",
         "failures": "none",
-        "fingerprint_at_commit": "5dcc49fa7acbabd0"
+        "fingerprint_at_commit": "59f20c6ba7df2bfb",
+        "mutation_reread_verified": "true"
       },
       "from_state": "VALIDATING",
       "proposal_id": "prop-c-support-sla",
@@ -159,7 +160,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-a",
-      "at": "2026-07-25T21:01:16.247686Z",
+      "at": "2026-07-26T00:23:17.253689Z",
       "detail": "executing",
       "evidence": {},
       "from_state": "PREPARED",
@@ -170,7 +171,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-a",
-      "at": "2026-07-25T21:01:16.350896Z",
+      "at": "2026-07-26T00:23:17.332160Z",
       "detail": "validating",
       "evidence": {},
       "from_state": "EXECUTING",
@@ -181,7 +182,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-a",
-      "at": "2026-07-25T21:01:16.427086Z",
+      "at": "2026-07-26T00:23:17.430666Z",
       "detail": "committed",
       "evidence": {
         "artifact": "fct_revenue.sql",
@@ -189,7 +190,8 @@
         "context_source": "fixture",
         "diff": "1 line(s) changed",
         "failures": "none",
-        "fingerprint_at_commit": "a4509bdbd64fd30b"
+        "fingerprint_at_commit": "c1e0841451f0a093",
+        "mutation_reread_verified": "true"
       },
       "from_state": "VALIDATING",
       "proposal_id": "prop-a-rename-revenue",
@@ -199,7 +201,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-b",
-      "at": "2026-07-25T21:01:16.545779Z",
+      "at": "2026-07-26T00:23:17.552497Z",
       "detail": "analyzing",
       "evidence": {},
       "from_state": "BLOCKED",
@@ -210,14 +212,14 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-b",
-      "at": "2026-07-25T21:01:16.704865Z",
+      "at": "2026-07-26T00:23:17.731509Z",
       "detail": "prepared",
       "evidence": {
         "approval_required": "true",
         "blast_radius": "1",
         "context_source": "fixture",
-        "lease_id": "lease-0360ebd30da0",
-        "subgraph_fingerprint": "f3e7aa0b6dc10ebb"
+        "lease_id": "lease-c0a1141a9626",
+        "subgraph_fingerprint": "efa77233692f80ca"
       },
       "from_state": "ANALYZING",
       "proposal_id": "prop-b-net-revenue-metric",
@@ -227,7 +229,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-b",
-      "at": "2026-07-25T21:01:16.858308Z",
+      "at": "2026-07-26T00:23:17.861858Z",
       "detail": "executing",
       "evidence": {},
       "from_state": "PREPARED",
@@ -238,7 +240,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-b",
-      "at": "2026-07-25T21:01:17.069517Z",
+      "at": "2026-07-26T00:23:17.950921Z",
       "detail": "validating",
       "evidence": {},
       "from_state": "EXECUTING",
@@ -249,7 +251,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-b",
-      "at": "2026-07-25T21:01:17.215031Z",
+      "at": "2026-07-26T00:23:18.032996Z",
       "detail": "committed",
       "evidence": {
         "artifact": "metric_net_revenue.sql",
@@ -257,7 +259,8 @@
         "context_source": "fixture",
         "diff": "7 line(s) changed",
         "failures": "none",
-        "fingerprint_at_commit": "f3e7aa0b6dc10ebb"
+        "fingerprint_at_commit": "efa77233692f80ca",
+        "mutation_reread_verified": "true"
       },
       "from_state": "VALIDATING",
       "proposal_id": "prop-b-net-revenue-metric",
@@ -267,7 +270,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-d",
-      "at": "2026-07-25T21:01:17.399094Z",
+      "at": "2026-07-26T00:23:18.174756Z",
       "detail": "submitted",
       "evidence": {},
       "from_state": null,
@@ -278,7 +281,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-d",
-      "at": "2026-07-25T21:01:17.486837Z",
+      "at": "2026-07-26T00:23:18.254286Z",
       "detail": "analyzing",
       "evidence": {},
       "from_state": "SUBMITTED",
@@ -289,7 +292,7 @@
     {
       "actor": "coordinator",
       "agent_id": "agent-d",
-      "at": "2026-07-25T21:01:17.587800Z",
+      "at": "2026-07-26T00:23:18.345649Z",
       "detail": "Stale expected version for urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD)",
       "evidence": {
         "stale_urns": "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD)"

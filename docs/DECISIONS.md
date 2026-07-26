@@ -143,3 +143,115 @@ exemption for keys ending in `_fingerprint`.
 
 Silently degrading to fixtures when a real instance was expected would let a deployment claim
 DataHub integration it does not have, which would make the submission's central claim untrue.
+
+## ADR-012: Reads fail closed; a degraded read is never an empty graph
+
+**Status:** Accepted, superseding the tolerant-extractor design in the rejected candidate
+**Date:** 2026-07-25
+
+The first DataHub provider was written from documentation rather than observed payloads. It
+accepted several plausible response shapes, degraded to "field unknown" on a mismatch, and
+swallowed MCP errors into an empty edge list. The reasoning recorded at the time was that a wrong
+guess would produce a missing field rather than a wrong conflict decision.
+
+That reasoning was wrong, and the coordinator rejected the candidate for it.
+
+**An empty graph is not a neutral result.** It is indistinguishable from a graph with no
+conflicts. A swallowed lineage failure therefore converts "the coordinator cannot see the graph"
+into "nothing conflicts, commit away" — the most dangerous possible misreading, arrived at
+silently.
+
+The rule now: every read raises `ContextReadError` on a transport failure, a tool error, or a
+payload outside the documented contract. `McpContractError` covers the shape case specifically.
+`prepare` aborts and audits `fail_closed=context_read`; the pre-commit re-read aborts the same
+way; `GET /api/graph` answers 503. A partial snapshot is never produced, because a missing entity
+or edge changes conflict decisions.
+
+Two distinctions this deliberately preserves:
+
+- **A missing optional value is not an unknown shape.** An entity with no description, no owners,
+  or no domain is a legitimate answer and yields `None` or an empty list.
+- **Not asking beats tolerating an error.** A dashboard has no columns, so `list_schema_fields`
+  is not called for entity types that have no schema. The previous code asked anyway and then had
+  to tolerate the resulting error — which is precisely the tolerance that hid real failures.
+
+## ADR-013: `COMMITTED` requires positive verification of every step
+
+**Status:** Accepted
+**Date:** 2026-07-25
+
+`COMMITTED` previously meant the executor and the writeback had returned without raising. That is
+weaker than it reads. The executor returning cleanly does not say the intended bytes are on disk,
+and a writeback call succeeding does not say DataHub holds the written value.
+
+`CommitVerification` now tracks seven independent signals: mutation applied, mutation re-read,
+validation passed, writeback attempted, writeback verified, writeback restored, artifact rolled
+back — plus the receipts written. A proposal reaches `COMMITTED` only when the artifact mutation
+is confirmed by **re-reading the file from disk**, validation passed, and — when a writeback was
+attempted — DataHub **returned the written value on re-read**. Any failure rolls the artifact back
+and aborts, so a half-applied change cannot survive.
+
+`commit_permitted()` is re-checked at the end of the commit path rather than assumed from the
+control flow above it. Adding a step without adding it to the gate should fail, not quietly widen
+what "committed" means.
+
+**Verification and restoration are separate facts.** A verified write whose restoration failed
+still proves the write landed; the receipt records the unrestored value loudly rather than
+collapsing both into one boolean. Restoration failure therefore does not retract a commit, but is
+never reported as success. Collapsing them would hide which of the two actually happened, and
+"we left the shared instance dirty" is exactly the thing a reader needs to know.
+
+## ADR-014: DataHub state changes are planned, guarded whole, and applied only on request
+
+**Status:** Accepted
+**Date:** 2026-07-25
+
+Seed, reset, and restore operate on an instance shared with four other submissions. Each is
+therefore produced as an inert, inspectable list of aspect operations and guarded **as a whole**
+before anything is applied.
+
+Guarding the complete plan up front means a plan containing one foreign URN is refused entirely,
+rather than applied up to the bad entry and leaving the shared instance half-modified. It also
+makes the plan deterministic and fingerprintable, so a coordinator can diff what a run *would* do
+against what a previous run did, and can apply it on the host without this project ever holding
+credentials.
+
+Three specific guards:
+
+- **Payloads are guarded, not just addresses.** An aspect attached to one of our datasets can
+  name someone else's dataset as an upstream, or another project's domain. Guarding only the
+  entity URN would let that through and write a cross-project edge.
+- **Reset takes an explicit scope and accepts only `namespace`.** A global refresh has to be
+  asked for and be refused, rather than being an omission that silently widens the blast radius.
+  Deletes are soft, and the generated ingestion recipe disables stale-entity removal — with it
+  enabled, ingesting only our allocation would mark everyone else's entities stale.
+- **Empty plans are refused.** An empty seed, reset, or restore that exits 0 is a claim that work
+  happened when none did.
+
+`--apply` is opt-in and refuses without live credentials; a plan is not applied on a guess about
+where it would land. `apply_plan` re-guards immediately before emitting, so a plan mutated after
+being built cannot ride the earlier check.
+
+## ADR-015: The judge console ships inside the package and fetches nothing
+
+**Status:** Accepted, refining ADR-003
+**Date:** 2026-07-25
+
+The console is a single self-contained document served at `/` from inside the package: inline
+CSS, inline JS, inline SVG, no external stylesheet, script, font, or fetch target. Judges may
+review on a locked-down machine, and a page that degrades without a CDN would make the project
+look broken for a reason that has nothing to do with the project.
+
+Its scenario runs in a dedicated state directory that is reset and reseeded on each press. A
+judge may press the button more than once, and doing that to the live state directory would
+destroy proposals submitted through the API alongside it.
+
+Because the console is the only non-Python runtime asset, it is the only one a packaging change
+can drop while every source-tree test still passes. Archive verification therefore requires it in
+the wheel explicitly, and reads it back from an installed package in a directory with no access
+to this source tree.
+
+Two static guards stand in for a browser, since none was available: the inline script is parsed
+with `node --check` (skipped when node is absent), and every element id the script looks up must
+exist in the document. Both catch failures that would leave the console blank while the payload
+tests stayed green.
