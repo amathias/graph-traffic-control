@@ -220,3 +220,36 @@ class TestArchiveMemberRules:
         assert declared == set(archive.CONSOLE_SCRIPTS), (
             "a console script was added without adding it to archive verification"
         )
+
+
+class TestDataHubDependenciesArePinnedExactly:
+    """The deployment target runs against specific versions, not "whatever resolves today".
+
+    The MCP argument names, response envelopes, and aspect shapes this project implements were
+    observed against these two versions. Everything downstream of them fails closed on an
+    unrecognised shape, so a floating range converts a patch release into a refused deploy.
+    """
+
+    EXPECTED = {"acryl-datahub": "1.6.0.15", "mcp": "1.28.1"}
+
+    @pytest.fixture
+    def datahub_extra(self):
+        import tomllib
+
+        from graph_traffic_control.config import REPO_ROOT
+
+        with (REPO_ROOT / "pyproject.toml").open("rb") as handle:
+            data = tomllib.load(handle)
+        return data["project"]["optional-dependencies"]["datahub"]
+
+    def test_the_expected_versions_are_pinned(self, datahub_extra):
+        assert sorted(datahub_extra) == sorted(
+            f"{name}=={version}" for name, version in self.EXPECTED.items()
+        )
+
+    def test_no_datahub_requirement_uses_a_floating_range(self, datahub_extra):
+        for requirement in datahub_extra:
+            assert "==" in requirement, f"{requirement} is not pinned"
+            assert not any(
+                operator in requirement for operator in (">=", "<=", "~=", ">", "<", "*")
+            ), f"{requirement} still permits a version this project has not been built against"

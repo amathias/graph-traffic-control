@@ -19,9 +19,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Pinned exactly, not ranged. These two talk to an instance shared with four other submissions,
+# and the argument names, response envelopes, and aspect shapes this project implements were
+# observed against these versions specifically. A floating range would let a patch release change
+# a payload shape under a fail-closed reader and turn a working deploy into a refusal.
 datahub = [
-  "acryl-datahub>=1.1,<2",
-  "mcp>=1.9,<2",
+  "acryl-datahub==1.6.0.15",
+  "mcp==1.28.1",
 ]
 dev = [
   "build>=1.2,<2",
