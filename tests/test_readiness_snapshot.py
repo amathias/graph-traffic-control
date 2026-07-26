@@ -218,3 +218,91 @@ class TestStillNonMutating:
         _check(live_state, seeded_settings, namespace, allocated)
         called = {name for name, _ in live_state.calls}
         assert "update_description" not in called
+
+
+FCT_REVENUE = "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD)"
+METRIC_NET_REVENUE = (
+    "urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.metric_net_revenue,PROD)"
+)
+
+
+class TestSeededLineageMustReadBack:
+    """An edgeless live graph must never be reported ready.
+
+    The live instance returned every allocated entity and **zero** downstream matches for
+    ``traffic.fct_revenue`` — a dataset whose ``upstreamLineage`` edge to
+    ``traffic.metric_net_revenue`` had been applied and accepted. Entities present, lineage
+    unreadable: a graph index problem, not a seeding problem.
+
+    Reading that as "no edges" would make `/api/graph` answer 200 with nine entities and no
+    lineage, and a graph with no lineage answers "nothing conflicts" to every question. The
+    project's central claim is an edge, so an edge that will not read back is a hard stop.
+    """
+
+    def test_an_unindexed_lineage_graph_is_not_ready(
+        self, live_state, seeded_settings, namespace, allocated
+    ):
+        live_state.facet_only_downstreams.add(FCT_REVENUE)
+        check = _check(live_state, seeded_settings, namespace, allocated)
+
+        assert check["ok"] is False
+        assert check["status"] == "lineage_incomplete"
+        assert [FCT_REVENUE, METRIC_NET_REVENUE] in check["missing_edges"]
+
+    def test_the_failure_says_reindex_and_not_reseed(
+        self, live_state, seeded_settings, namespace, allocated
+    ):
+        """Nobody must be sent to re-seed a correctly seeded shared instance."""
+        live_state.facet_only_downstreams.add(FCT_REVENUE)
+        detail = _check(live_state, seeded_settings, namespace, allocated)["detail"]
+
+        assert "do NOT re-seed" in detail
+        assert "Reindex" in detail
+        assert "graph index" in detail
+
+    def test_it_still_confirms_the_entities_were_present(
+        self, live_state, seeded_settings, namespace, allocated
+    ):
+        """Otherwise the operator debugs the wrong layer."""
+        live_state.facet_only_downstreams.add(FCT_REVENUE)
+        check = _check(live_state, seeded_settings, namespace, allocated)
+        assert check["allocated_entities_found"] == check["allocated_entities_expected"] == 9
+
+    def test_a_totally_empty_lineage_index_is_not_ready(
+        self, live_state, seeded_settings, namespace, allocated
+    ):
+        """The worst case: every edge missing, every entity present."""
+        live_state.lineage.clear()
+        check = _check(live_state, seeded_settings, namespace, allocated)
+
+        assert check["ok"] is False
+        assert check["status"] == "lineage_incomplete"
+        assert check["graph_entities"] == 9
+        assert check["graph_edges"] == 0
+        assert len(check["missing_edges"]) == 7
+
+    def test_a_single_missing_edge_is_enough_to_refuse(
+        self, live_state, seeded_settings, namespace, allocated
+    ):
+        """No 'mostly complete' tolerance: the hidden conflict rides on one edge."""
+        live_state.lineage[FCT_REVENUE] = []
+        check = _check(live_state, seeded_settings, namespace, allocated)
+        assert check["ok"] is False
+        assert check["status"] == "lineage_incomplete"
+        assert check["missing_edges"] == [[FCT_REVENUE, METRIC_NET_REVENUE]]
+
+    def test_a_healthy_instance_reports_the_edges_it_verified(
+        self, live_state, seeded_settings, namespace, allocated
+    ):
+        check = _check(live_state, seeded_settings, namespace, allocated)
+        assert check["ok"] is True
+        assert check["status"] == "verified"
+        assert check["lineage_edges_verified"] == 7
+
+    def test_extra_live_lineage_does_not_fail_readiness(
+        self, live_state, seeded_settings, namespace, allocated
+    ):
+        """The guard is about missing seeded edges, not about forbidding new ones."""
+        live_state.lineage.setdefault(METRIC_NET_REVENUE, []).append(FCT_REVENUE)
+        check = _check(live_state, seeded_settings, namespace, allocated)
+        assert check["ok"] is True

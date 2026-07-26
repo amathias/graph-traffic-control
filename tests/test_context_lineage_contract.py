@@ -102,14 +102,14 @@ class TestTheExactLiveResponse:
         with pytest.raises(McpContractError, match="no 'downstreams' key"):
             downstream_urns_from_lineage({})
 
-    def test_an_absent_search_results_key_is_not_the_same_as_null(self):
-        """The narrowest possible allowance.
+    def test_an_absent_search_results_key_with_no_total_is_refused(self):
+        """An empty object says nothing about how many matches there were.
 
-        The live server sends ``searchResults`` and sets it to null. A response missing the key
-        entirely is a shape this project has never seen, so it is refused rather than guessed at
-        — accepting it would turn "we do not recognise this response" into "no edges".
+        A later live observation showed ``searchResults`` can be omitted legitimately, but only
+        alongside a ``total`` that states the count — see :class:`TestTheFacetsOnlyEnvelope`. With
+        neither, the response is simply unrecognised, and unrecognised must not become "no edges".
         """
-        with pytest.raises(McpContractError, match="no 'searchResults' key"):
+        with pytest.raises(McpContractError, match="neither 'searchResults' nor an integer"):
             downstream_urns_from_lineage({"downstreams": {}})
 
     def test_a_malformed_entry_inside_the_list_still_raises(self):
@@ -195,3 +195,52 @@ class TestStillFailsClosed:
         snapshot = _snapshot(live_like, namespace, collect_urns(graph))
         assert all(FOREIGN not in (e.upstream, e.downstream) for e in snapshot.edges)
         assert len(snapshot.edges) == 7
+
+
+#: The live envelope for the second failure: `facets` and `total`, no `searchResults` key.
+#: Sanitized from the coordinator's live capture of the downstream call on traffic.fct_revenue.
+LIVE_FACETS_ONLY = {
+    "downstreams": {
+        "total": 0,
+        "facets": [
+            {
+                "displayName": "Degree",
+                "aggregations": [
+                    {"count": 0, "value": "1"},
+                    {"count": 0, "value": "2"},
+                    {"count": 0, "value": "3+"},
+                ],
+            }
+        ],
+    }
+}
+
+
+class TestTheFacetsOnlyEnvelope:
+    """`searchResults` omitted, `facets` and `total` present.
+
+    `total` is the server's own count of matches, so it decides whether this is an empty answer
+    or a withheld one. The absence of a key decides nothing.
+    """
+
+    def test_total_zero_is_an_empty_downstream_set(self):
+        assert downstream_urns_from_lineage(LIVE_FACETS_ONLY) == []
+
+    def test_a_nonzero_total_without_results_is_refused(self):
+        """Told there are matches and not given them: never read as 'no edges'."""
+        payload = {"downstreams": {"total": 3, "facets": []}}
+        with pytest.raises(McpContractError, match="total=3"):
+            downstream_urns_from_lineage(payload)
+
+    def test_no_search_results_and_no_total_is_refused(self):
+        with pytest.raises(McpContractError, match="neither 'searchResults' nor an integer"):
+            downstream_urns_from_lineage({"downstreams": {"facets": []}})
+
+    def test_a_non_integer_total_is_refused(self):
+        with pytest.raises(McpContractError, match="neither 'searchResults' nor an integer"):
+            downstream_urns_from_lineage({"downstreams": {"total": "0"}})
+
+    def test_a_true_total_is_not_mistaken_for_one(self):
+        """`True == 1` in Python; a boolean total is not a count."""
+        with pytest.raises(McpContractError):
+            downstream_urns_from_lineage({"downstreams": {"total": True, "facets": []}})

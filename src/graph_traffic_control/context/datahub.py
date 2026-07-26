@@ -207,13 +207,25 @@ def downstream_urns_from_lineage(payload: dict[str, Any]) -> list[str]:
             f"{TOOL_GET_LINEAGE} 'downstreams' is a {type(downstreams).__name__}; "
             "expected an object with 'searchResults'."
         )
-    # An *absent* searchResults key is still a contract violation. The live instance sends the
-    # key and sets it to null; a response missing it altogether is a different shape that this
-    # project has never observed and will not guess at.
     if "searchResults" not in downstreams:
+        # Observed live: a result envelope carrying `facets` and `total` but omitting
+        # `searchResults` entirely. `total` is the server's own count of matches, so it — not the
+        # absence of a key — decides whether this is an empty answer or a broken one.
+        total = downstreams.get("total")
+        if total == 0:
+            return []
+        if isinstance(total, int):
+            # It says there are matches and then does not include them. Treating that as "no
+            # edges" would drop real lineage silently, which is the one outcome this reader exists
+            # to prevent.
+            raise McpContractError(
+                f"{TOOL_GET_LINEAGE} reports total={total} downstream match(es) but omitted "
+                f"'searchResults' (keys: {sorted(downstreams)}). Refusing to treat withheld "
+                f"results as an empty edge set."
+            )
         raise McpContractError(
-            f"{TOOL_GET_LINEAGE} 'downstreams' has no 'searchResults' key "
-            f"(keys: {sorted(downstreams)})."
+            f"{TOOL_GET_LINEAGE} 'downstreams' has neither 'searchResults' nor an integer "
+            f"'total' (keys: {sorted(downstreams)})."
         )
     results = downstreams["searchResults"]
     if results is None:

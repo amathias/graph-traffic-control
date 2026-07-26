@@ -465,3 +465,76 @@ instance. It remains strictly non-mutating: `snapshot()` only reads.
 
 The invariant is now asserted directly — readiness may not be ready while `/api/graph` would 503,
 tested through the real HTTP surface in both directions.
+
+## ADR-020: An edgeless live graph is a hard stop, not an empty result
+
+**Status:** Accepted
+**Date:** 2026-07-26
+
+The second live run reached `/api/readiness` → **503, `graph_unreadable`** with all nine allocated
+entities found, failing on:
+
+> downstream lineage for `urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD)`
+> has no `searchResults` key; observed keys are `facets` and `total`
+
+The `facets` aggregations reported `count: 0` for every degree bucket.
+
+### The 503 was correct, and accepting the shape as "empty" would have been the wrong fix
+
+`traffic.fct_revenue` **has** a downstream. The seed applied `upstreamLineage` on
+`traffic.metric_net_revenue` naming `fct_revenue` as its upstream, and all 49 operations were
+accepted. A downstream query on `fct_revenue` that returns zero matches is therefore not reporting
+the graph — it is reporting that the **lineage index cannot see the graph**, which is consistent
+with the shared OpenSearch instance having been recovered without the graph service being
+reindexed.
+
+Measured, against the protocol double emitting that exact envelope for every dataset:
+
+```
+entities: 9   edges: 0    -> /api/graph would answer HTTP 200
+```
+
+Nine correct entities and no lineage. That snapshot answers **"nothing conflicts"** to every
+question asked of it, and this project's central claim is precisely an edge — the conflict between
+two proposals that share no declared URN and are connected only by DataHub lineage. A judge would
+have watched A and B commit in parallel as unrelated changes. The loud 503 is enormously preferable
+to that, so the fix is deliberately *not* "make the read succeed".
+
+### Two changes
+
+**1. The envelope is read properly, so the diagnosis is accurate.** `facets`/`total` without
+`searchResults` is a real response shape. `total` — the server's own count of matches — decides
+what it means, not the absence of a key:
+
+| `downstreams` contents | Result |
+|---|---|
+| `searchResults: [...]` / `[]` / `null` | read / empty / empty (ADR-019) |
+| no `searchResults`, `total: 0` | empty |
+| no `searchResults`, `total: n > 0` | **raises** — told there are matches, given none |
+| no `searchResults`, no integer `total` | **raises** — unrecognised |
+
+A boolean `total` raises too: `True == 1` in Python, and a flag is not a count.
+
+**2. Readiness verifies the seeded lineage reads back.** This is ADR-004's complete-catalogue rule
+applied to edges, for the identical stated reason — *a partial graph reports fewer conflicts than
+really exist* — and it matters more for edges than for entities, because an edgeless graph is not a
+degraded answer but a confidently wrong one.
+
+Missing seeded edges produce a new `lineage_incomplete` status, distinct from
+`entities_missing`. The distinction is operational, not cosmetic: entities present + edges missing
+is an **index** problem, and the detail line says so explicitly — *reindex the graph service, do
+NOT re-seed*. Sending an operator to re-seed a correctly seeded shared instance would be a
+destructive answer to a read-only problem.
+
+One missing edge is enough to refuse. There is no "mostly complete" tolerance, because the hidden
+conflict this project exists to demonstrate rides on exactly one edge.
+
+Extra live lineage does not fail readiness. The guard is about seeded edges that have gone
+missing, not about forbidding lineage the instance legitimately grew.
+
+### The double, again
+
+The protocol double could not produce this envelope either, so the suite could not have caught it —
+the same gap as ADR-018 and ADR-019, third time. `FakeMcpState.facet_only_downstreams` now emits
+it verbatim. The lesson stands: **the double is only worth what it faithfully reproduces, and every
+live observation that contradicts it is a correction to make immediately.**

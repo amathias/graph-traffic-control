@@ -11,7 +11,7 @@ import pytest
 
 from graph_traffic_control import readiness
 from graph_traffic_control.context.mcp_client import McpClient
-from graph_traffic_control.demo.seed import load_manifest
+from graph_traffic_control.demo.seed import load_fixture_graph, load_manifest
 from tests.fake_mcp import FakeMcpServer, FakeMcpState
 
 TOKEN = "test-token"  # noqa: S105 - fixture value
@@ -29,12 +29,20 @@ DOMAIN_URN = "urn:li:domain:graph-traffic-control"
 
 
 @pytest.fixture
-def live_state(allocated) -> FakeMcpState:
+def live_state(allocated, seeded_settings) -> FakeMcpState:
+    """A *healthy* live instance: tag, domain, every allocated entity, and the seeded lineage.
+
+    The lineage matters. Readiness verifies that the edges this project seeded read back, because
+    a graph with the right entities and no edges reports no conflicts (ADR-020), so a fixture
+    without lineage is not a healthy instance — it is the unindexed one.
+    """
     state = FakeMcpState()
     state.add_entity(PROJECT_TAG_URN, name="project-graph-traffic-control")
     state.add_entity(DOMAIN_URN, name="Demo / Graph Traffic Control")
     for urn in allocated:
         state.add_entity(urn, name=urn)
+    for edge in load_fixture_graph(seeded_settings)["edges"]:
+        state.lineage.setdefault(edge["upstream"], []).append(edge["downstream"])
     return state
 
 

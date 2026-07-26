@@ -35,17 +35,17 @@ live EC2 host from this project chat.
 
 | Field | Current value |
 |---|---|
-| Status | `in progress` |
-| Milestone | **Live capture and seed succeeded on the shared instance.** The live `/api/graph` lineage contract failure is fixed, and readiness can no longer report ready while `/api/graph` fails. Awaiting redeploy and the proposal/writeback leg. |
+| Status | `blocked on infrastructure` |
+| Milestone | Live capture and seed succeeded. Two lineage read contracts fixed. **The remaining live failure is a DataHub graph-index problem, not a code defect: `traffic.fct_revenue` returns zero downstreams for an edge that was successfully seeded.** Readiness correctly refuses to serve. Needs a graph-service reindex — see "The lineage index is empty" below. |
 | Verified commit/artifact | See "Deployment candidate" below |
 | Build command | `python -m venv .venv && .venv/Scripts/python.exe -m pip install -e ".[dev]"` |
 | DataHub extra | `pip install -e ".[datahub]"` on the host — **pinned exactly** to `acryl-datahub==1.6.0.15` and `mcp==1.28.1` (ADR-017). **Installed in a throwaway local venv this session** to verify the emitter contract against the real library; never pointed at any instance, and no network call was made with it. |
-| Test command | `.venv/Scripts/python.exe -m pytest` — **583 passed, 1 skipped** in 183 s, no network required. The skip is `test_datahub_sdk_pinned.py`, which needs the optional extra. |
-| Test command (with the extra) | `pytest` in a venv that also has `.[datahub]` — **594 passed, 0 skipped**. This is the host configuration. |
-| Coverage | `pytest --cov=graph_traffic_control` — **89%** (2698 statements, 289 missed). `demo/datahub_state.py` is now **96%**: the emitter boundary is executed by tests rather than excluded by a `pragma: no cover`, which is what let the blocker through. The largest gap remains `release/archive.py` at 30%: its end-to-end path builds distributions and creates a virtual environment, so it runs as the `gtc-archive-verify` release command rather than in the suite. |
+| Test command | `.venv/Scripts/python.exe -m pytest` — **595 passed, 1 skipped** in 192 s, no network required. The skip is `test_datahub_sdk_pinned.py`, which needs the optional extra. |
+| Test command (with the extra) | `pytest` in a venv that also has `.[datahub]` — **606 passed, 0 skipped**. This is the host configuration. |
+| Coverage | `pytest --cov=graph_traffic_control` — **89%** (2711 statements, 291 missed). `demo/datahub_state.py` is now **96%**: the emitter boundary is executed by tests rather than excluded by a `pragma: no cover`, which is what let the blocker through. The largest gap remains `release/archive.py` at 30%: its end-to-end path builds distributions and creates a virtual environment, so it runs as the `gtc-archive-verify` release command rather than in the suite. |
 | Lint command | `.venv/Scripts/python.exe -m ruff check .` — clean |
 | Build/archive check | `gtc-archive-verify` — **8/8 pass**, including a clean-environment wheel install |
-| Safety scan | `gtc-safety-scan` — **0 blockers, 0 warnings** across 82 tracked files |
+| Safety scan | `gtc-safety-scan` — **0 blockers, 0 warnings** across 84 tracked files |
 | Seed / reset | `gtc-seed` / `gtc-reset` (local, offline, always safe) |
 | DataHub state | `gtc-datahub-seed`, `gtc-datahub-reset`, `gtc-datahub-capture`, `gtc-datahub-restore` — **plan-only by default**; `--apply` requires live credentials |
 | DataHub artifacts | Under `APP_STATE_DIR/datahub/`: `pre_seed_capture.json`, `seed_plan.json`, `reset_plan.json`, `restore_plan.json`, `ingestion_recipe.yaml`. These names are asserted by the suite against this document, the README, and the runbook, so they cannot drift from the docs again. |
@@ -55,25 +55,25 @@ live EC2 host from this project chat.
 | Run command | `gtc-api` (uvicorn, `APP_HOST`:`APP_PORT`) |
 | Judge UI | `GET /` — self-contained page; one button runs the whole scenario |
 | Health endpoint | `GET /api/health` — verified 200 on a running server |
-| Readiness endpoint | `GET /api/readiness` — verified 200 seeded (fixture mode), 503 unseeded, 503 in non-local env without credentials, and **503 whenever the graph snapshot will not build**, so it can no longer report ready while `/api/graph` fails (ADR-019). Reports `graph_entities`, `graph_edges`, and `graph_fingerprint`. |
+| Readiness endpoint | `GET /api/readiness` — 200 seeded (fixture mode), 503 unseeded, 503 in non-local env without credentials, **503 whenever the graph snapshot will not build** (ADR-019), and **503 when seeded lineage edges cannot be read back** (`lineage_incomplete`, ADR-020). Reports `graph_entities`, `graph_edges`, `graph_fingerprint`, `lineage_edges_verified`. |
 | Persistent volumes | `APP_STATE_DIR` (default `demo/state`) holds `transactions.sqlite`, `artifacts/`, `receipts/`, `datahub/` (plans), `judge/` (judge-run state). Disposable and recreated by `gtc-seed`. **SQLite means a single writer: run one replica.** |
 | Long-running workers | None. Single uvicorn process, no background jobs. |
 | DataHub read | **Partially verified live.** The coordinator's live run read the catalogue successfully; the graph read then failed on dashboard downstream lineage, which is fixed here (ADR-019). The fix itself is verified against the protocol double, now corrected to emit the live server's shape. **This session made no connection to the shared instance.** |
 | DataHub writeback | **Not verified live.** Reversible capture → write → re-read → restore, with verification and restoration tracked independently. **No live receipt exists.** |
 | DataHub ingestion | **Applied live by the coordinator.** All 49 typed operations of plan `cd44112ebd42b7de` were accepted by the shared instance. This build changes no plan — the fingerprint is byte-identical, so **do not seed again**. |
 | DataHub emission | **Verified against the pinned SDK, offline.** All 103 operations across the seed, reset, and both restore plans construct as real typed aspects and serialise to the bytes the emitter would send. No emitter was ever connected. |
-| Blockers | The proposal/writeback leg has not been run live and has no receipt. Live access requires SSM, which this session was instructed not to use. Everything else is complete. |
-| Evidence produced | 583 passing tests offline / 594 with the extra; live capture and seed evidence recorded below; `examples/`; sanitized receipts under `APP_STATE_DIR/receipts`; `docs/DECISIONS.md` ADR-001..019; `docs/LIMITATIONS.md`; `docs/SUBMISSION.md`; `docs/DEMO_RUNBOOK.md` |
+| Blockers | **DataHub's graph/lineage index does not return the seeded lineage.** Entities and aspects were accepted; only the index is behind. A reindex of the graph service is required before this project can serve live — no code change will fix it, and none should. The proposal/writeback leg has not been run live and has no receipt. |
+| Evidence produced | 595 passing tests offline / 606 with the extra; live capture and seed evidence recorded below; `examples/`; sanitized receipts under `APP_STATE_DIR/receipts`; `docs/DECISIONS.md` ADR-001..020; `docs/LIMITATIONS.md`; `docs/SUBMISSION.md`; `docs/DEMO_RUNBOOK.md` |
 
 ## Deployment candidate
 
 | Field | Value |
 |---|---|
 | Branch | `main` |
-| Product candidate | `754abcb` — full SHA `754abcb2ddb40892b8a6817534fa39a6a39ce202`. Supersedes `0f400a7`, whose `/api/graph` fails against the live instance. **Deploy only — do not capture or seed again.** |
+| Product candidate | See "The lineage index is empty" above. Supersedes `754abcb`. **Deploying it will not make the instance ready** — the remaining failure is a DataHub graph-index problem. Deploy only; do not capture or seed. |
 | Tree state | Clean at that commit; `git status` empty |
 | Pushed to origin | `origin/main` |
-| Verified at that commit | **583 tests pass, 1 skipped** offline and **594 pass, 0 skipped** with the pinned extra, **89% coverage** (2698 statements, 289 missed), `ruff check` clean, `gtc-archive-verify` **8/8** (including a clean-environment wheel install), `gtc-safety-scan` **0 blockers / 0 warnings** across 82 tracked files, four-agent scenario runs end to end, judge workflow reproduces the result below unchanged, health 200, readiness 200 and `/api/graph` 200 seeded |
+| Verified at that commit | **595 tests pass, 1 skipped** offline and **606 pass, 0 skipped** with the pinned extra, **89% coverage** (2711 statements, 291 missed), `ruff check` clean, `gtc-archive-verify` **8/8** (including a clean-environment wheel install), `gtc-safety-scan` **0 blockers / 0 warnings** across 84 tracked files, four-agent scenario runs end to end, judge workflow reproduces the result below unchanged, health 200, readiness 200 and `/api/graph` 200 seeded (fixture mode) |
 
 ### The seed plan fingerprint has changed
 
@@ -117,6 +117,67 @@ correctly returns 503, so the service will not report ready until credentials ar
 
 Artifact digests are reported by `gtc-archive-verify`, but the distributions are **not**
 bit-for-bit reproducible — a digest identifies one specific build, it does not certify one.
+
+## The lineage index is empty. This is not a code defect, and must not be "fixed" in code.
+
+The live run of `754abcb` returned **503 `graph_unreadable`** with all nine allocated entities
+found, failing on:
+
+> downstream lineage for `urn:li:dataset:(urn:li:dataPlatform:duckdb,traffic.fct_revenue,PROD)`
+> has no `searchResults` key; observed keys are `facets` and `total`
+
+with `facets` reporting `count: 0` for every degree bucket.
+
+**`traffic.fct_revenue` has a downstream.** The seed applied `upstreamLineage` on
+`traffic.metric_net_revenue` naming `fct_revenue` as its upstream, and all 49 operations were
+accepted. Zero downstream matches therefore does not describe the graph — it describes a **lineage
+index that cannot see the graph**, consistent with the shared OpenSearch instance having been
+recovered without the graph service being reindexed.
+
+### Why the obvious fix would have been the dangerous one
+
+Measured against the protocol double emitting that exact envelope for every dataset:
+
+```
+entities: 9   edges: 0    -> /api/graph answers HTTP 200
+```
+
+Treating the response as "no downstreams" makes readiness green and `/api/graph` succeed — with
+**nine correct entities and no lineage**. That snapshot answers *"nothing conflicts"* to every
+question, and this project's entire claim is an edge: the conflict between two proposals that share
+no declared URN and are connected only by DataHub lineage. A judge would watch A and B commit in
+parallel as unrelated changes, with a green readiness endpoint vouching for it.
+
+The 503 is the correct behaviour. **Do not deploy a build that reads this as empty.**
+
+### What this build changes (neither unblocks the deploy)
+
+1. **The envelope is read properly, so the error is a diagnosis rather than a shape complaint.**
+   `total` decides the meaning: `total: 0` is empty; `total: n > 0` without results raises
+   ("told there are matches, given none"); no integer `total` raises. ADR-020 has the table.
+2. **Readiness verifies the seeded lineage reads back** — ADR-004's complete-catalogue rule applied
+   to edges. Missing seeded edges give a new **`lineage_incomplete`** status, distinct from
+   `entities_missing`, whose detail says explicitly: *reindex the graph service, do NOT re-seed.*
+   One missing edge is enough; the hidden conflict rides on exactly one.
+
+### Remediation, in order
+
+1. **Reindex DataHub's graph service** (the lineage index) on the shared instance. Nothing else in
+   this project's allocation needs touching. **Do not capture. Do not seed.** The entities and
+   their `upstreamLineage` aspects are already correct and accepted.
+2. `GET /api/readiness` — expect 200 with `status: "verified"`, `graph_edges: 7`, and
+   `lineage_edges_verified: 7`. If lineage is still unindexed you will now get 503
+   `lineage_incomplete` naming the exact missing edges, instead of a shape error.
+3. `GET /api/graph` — expect 200, 9 entities, **7 edges**. An edgeless 200 is a failure even
+   though it is a 200.
+4. Then the outstanding leg: one proposal through prepare/commit and one reversible writeback,
+   keeping the receipt with `verified: true` **and** `restored: true`.
+
+**Open question for the coordinator.** The sanitized `structuredContent` was truncated before
+`total`'s value. The reader is safe either way — `0` is read as empty and any positive value
+raises — but please confirm `total: 0`, and whether the graph service was reindexed after the
+OpenSearch recovery. If it was, the zero result needs investigating on the DataHub side before this
+project can be believed live.
 
 ## Live run of `0f400a7`: what happened, and what this build changes
 

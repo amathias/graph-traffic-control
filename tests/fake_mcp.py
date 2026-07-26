@@ -89,6 +89,10 @@ class FakeMcpState:
         #: non-dataset URN does so by default, matching the live instance; adding a dataset here
         #: forces the same shape onto it.
         self.null_downstreams: set[str] = set()
+        #: URNs whose downstream lineage answers with ``facets``/``total`` and **no**
+        #: ``searchResults`` key — what an unindexed graph service returns for an entity that
+        #: does have lineage. Takes precedence over :attr:`null_downstreams`.
+        self.facet_only_downstreams: set[str] = set()
         self.schema_fields: dict[str, list[dict[str, str]]] = {}
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.auth_headers: list[str | None] = []
@@ -308,6 +312,25 @@ def _dispatch(state: FakeMcpState, name: str, arguments: dict[str, Any]) -> Any:
             related = [u for u, downs in state.lineage.items() if urn in downs]
             key = "upstreams"
         else:
+            if urn in state.facet_only_downstreams:
+                # The second live shape: a result envelope with `facets` and `total` and no
+                # `searchResults` key at all. This is what an *unindexed* graph service returns
+                # for a dataset that does have lineage, so the double must be able to produce it.
+                return {
+                    "downstreams": {
+                        "total": 0,
+                        "facets": [
+                            {
+                                "displayName": "Degree",
+                                "aggregations": [
+                                    {"count": 0, "value": "1"},
+                                    {"count": 0, "value": "2"},
+                                    {"count": 0, "value": "3+"},
+                                ],
+                            }
+                        ],
+                    }
+                }
             if _answers_null_downstreams(state, urn):
                 # What the live instance actually returns for a lineage sink: a successful
                 # response whose nullable searchResults list is null, not an empty list. The

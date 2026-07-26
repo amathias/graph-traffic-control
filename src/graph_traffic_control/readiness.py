@@ -15,6 +15,11 @@ Two hard rules, both from the coordinator's live-milestone instruction:
    had ever read lineage. A readiness check that passes while the endpoint it vouches for fails
    does not merely miss the problem — it certifies it. Both modes therefore build the real
    snapshot through the same provider the API uses.
+4. **The seeded lineage must read back.** Entity completeness is not enough. This project's
+   central claim is an *edge* — the conflict between two proposals sharing no declared URN — so a
+   snapshot with all nine entities and no edges answers "nothing conflicts" to every question,
+   with HTTP 200. Readiness therefore verifies the edges too, and distinguishes a missing seed
+   from an unindexed graph so nobody re-seeds a correctly seeded instance.
 
 Mode is derived, not configured: live mode requires both ``DATAHUB_MCP_URL`` and ``DATAHUB_TOKEN``.
 In fixture mode the service is ready only in a local or test environment, so a deployed instance
@@ -267,6 +272,52 @@ def check_datahub(
         result["graph_entities"] = len(snapshot.entities)
         result["graph_edges"] = len(snapshot.edges)
         result["graph_fingerprint"] = snapshot.fingerprint()
+
+        # The lineage this project seeded must actually be readable back.
+        #
+        # This is the entity-completeness rule (ADR-004) applied to edges, for the identical
+        # reason: a partial graph reports fewer conflicts than really exist. It matters more for
+        # edges than for entities, because this project's central claim *is* an edge — the
+        # lineage-mediated conflict between two proposals that share no declared URN. A snapshot
+        # with the right nine entities and no edges is not a quiet degradation; it answers "these
+        # changes do not conflict" to every question, and it answers with HTTP 200.
+        #
+        # Entities present + edges missing is an index problem, not an ingestion problem, so the
+        # message must not send anyone to re-seed a correctly seeded instance.
+        try:
+            expected_edges = {
+                (edge["upstream"], edge["downstream"])
+                for edge in load_fixture_graph(settings).get("edges", [])
+            }
+        except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError) as exc:
+            return {
+                **result,
+                "ok": False,
+                "status": "expected_lineage_unknown",
+                "detail": (
+                    f"Cannot verify live lineage because the recorded allocation could not be "
+                    f"read: {exc}"
+                ),
+            }
+
+        built_edges = {(edge.upstream, edge.downstream) for edge in snapshot.edges}
+        if missing_edges := sorted(expected_edges - built_edges):
+            return {
+                **result,
+                "ok": False,
+                "status": "lineage_incomplete",
+                "missing_edges": [list(edge) for edge in missing_edges],
+                "detail": (
+                    f"All {len(expected)} allocated entities are present, but "
+                    f"{len(missing_edges)} of {len(expected_edges)} seeded lineage edge(s) cannot "
+                    f"be read back — DataHub returned no downstream match for them. The entities "
+                    f"and their upstreamLineage aspects were accepted, so this is a graph index "
+                    f"problem, not a missing seed: do NOT re-seed. Reindex DataHub's graph service "
+                    f"(the lineage index) and re-check. Serving now would report a graph with no "
+                    f"lineage, and a graph with no lineage reports no conflicts."
+                ),
+            }
+        result["lineage_edges_verified"] = len(expected_edges)
 
         return {**result, "ok": True, "status": "verified"}
     finally:
