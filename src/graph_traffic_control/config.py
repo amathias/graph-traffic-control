@@ -47,11 +47,12 @@ class Settings(BaseSettings):
         default="urn:li:domain:graph-traffic-control", alias="DATAHUB_DOMAIN_URN"
     )
 
-    #: ``operation`` argument for the MCP ``update_description`` tool. The argument *name* is
-    #: coordinator-observed; this *value* is not, so it is configurable rather than hardcoded.
+    #: ``operation`` argument for the MCP ``update_description`` tool. **Live-confirmed against
+    #: DataHub 1.6.0**, which rejected the previous ``SET`` guess and accepted ``replace``.
+    #: Kept configurable so a different server can be accommodated without a code change.
     #: See docs/LIMITATIONS.md.
     datahub_description_operation: str = Field(
-        default="SET", alias="DATAHUB_DESCRIPTION_OPERATION"
+        default="replace", alias="DATAHUB_DESCRIPTION_OPERATION"
     )
 
     demo_fixture_root: Path = Field(

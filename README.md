@@ -158,21 +158,30 @@ tracked as seven independent signals, and every commit receipt records which of 
 
 ## Current status
 
+Live: **<https://traffic.datahub-hackathon.aaronmathias.com>** — the judge console, no login, no
+DataHub instance needed.
+
 Implemented and tested: the conflict matrix, two-phase commit with pre-commit graph recheck,
 expiring leases, real artifact mutation with rollback, verified reversible writeback, sanitized
 receipts, non-mutating readiness over the complete catalogue, deterministic namespace-guarded
 DataHub seed/reset/capture/restore planning, the judge console, release safety scanning, and
 archive verification.
 
-**No connection to the shared DataHub instance has been made from this workspace.** The MCP
-client, context provider, and writeback are exercised against a strict localhost protocol double
-over real HTTP — not against DataHub Core v1.6.0. The DataHub seed has been *planned*, never
-applied. There are no live receipts, and this README claims none.
+**The live DataHub gate is complete.** Against a shared open-source DataHub Core v1.6.0 instance:
+strong readiness passed over the complete allocated catalogue — 9 entities and 7 lineage edges,
+including the edge the headline conflict depends on; the project's graph was ingested as 49 typed
+metadata change proposals; and a **reversible writeback was verified and restored** on a real
+entity. Nothing outside this project's namespace was created, altered, or removed.
 
-[LIMITATIONS.md](./docs/LIMITATIONS.md) is the authoritative line between what has been executed
-and what has not. Everything produced against the protocol double is labelled **simulated**.
+That gate was run by the portfolio coordinator, who holds the credentials. **No connection to the
+shared instance has ever been made from this workspace** — here, the MCP client, context provider,
+and writeback run against a strict localhost protocol double over real HTTP, and every result they
+produce is labelled **simulated**.
 
-Remaining: the live DataHub run and the recorded demo.
+[LIMITATIONS.md](./docs/LIMITATIONS.md) is the authoritative line between what was executed live,
+what was executed offline, and what has not been executed at all.
+
+Remaining: the recorded demo video.
 
 ## Workspace map
 

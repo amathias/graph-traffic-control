@@ -6,19 +6,24 @@ shared instance is left as found; they are not evidence of a live DataHub write.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from graph_traffic_control.config import Settings
 from graph_traffic_control.context.mcp_client import McpClient, McpError
 from graph_traffic_control.context.namespace import Namespace, NamespaceViolation
 from graph_traffic_control.demo.agents import FCT_REVENUE
 from graph_traffic_control.domain.clock import ManualClock
 from graph_traffic_control.writeback.datahub import (
+    DEFAULT_DESCRIPTION_OPERATION,
     ReversibleDescriptionWriteback,
     WritebackError,
 )
 from tests.fake_mcp import FakeMcpServer, FakeMcpState
 
 TOKEN = "test-token"  # noqa: S105 - fixture value
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 NAMESPACE = Namespace(
     urn_prefix="traffic.",
@@ -44,6 +49,51 @@ def writeback(state):
         client = McpClient(server.url, TOKEN)
         yield ReversibleDescriptionWriteback(client, NAMESPACE, ManualClock())
         client.close()
+
+
+class TestTheDescriptionOperationIsLiveConfirmed:
+    """``replace``, not ``SET``.
+
+    ``SET`` was a guess from the aspect vocabulary — the coordinator supplied the argument *names*
+    for ``update_description`` but never this *value*. Live DataHub 1.6.0 **rejected** it, and the
+    same reversible write/re-read/restore cycle then succeeded with ``replace``.
+
+    These assert the exact string rather than "some non-empty default", because the failure mode
+    is a plausible-looking wrong value, and the whole restore guarantee rests on the operation
+    having replace-in-place semantics.
+    """
+
+    def test_the_module_default_is_replace(self):
+        assert DEFAULT_DESCRIPTION_OPERATION == "replace"
+
+    def test_the_settings_default_is_replace(self):
+        assert Settings().datahub_description_operation == "replace"
+
+    def test_neither_default_has_reverted_to_the_rejected_guess(self):
+        assert DEFAULT_DESCRIPTION_OPERATION != "SET"
+        assert Settings().datahub_description_operation != "SET"
+
+    def test_a_writeback_built_without_an_override_uses_replace(self, writeback):
+        assert writeback.operation == "replace"
+
+    def test_the_env_example_ships_the_confirmed_value(self):
+        text = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
+        assert "DATAHUB_DESCRIPTION_OPERATION=replace" in text
+        assert "DATAHUB_DESCRIPTION_OPERATION=SET" not in text
+
+    def test_the_value_is_still_overridable_for_a_different_server(self, state):
+        """Live-confirmed is not hardcoded: a future server must be accommodable."""
+        with FakeMcpServer(state) as server:
+            client = McpClient(server.url, TOKEN)
+            try:
+                writeback = ReversibleDescriptionWriteback(
+                    client, NAMESPACE, ManualClock(), operation="OVERRIDDEN"
+                )
+                writeback.apply(FCT_REVENUE, "note")
+                writes = [args for name, args in state.calls if name == "update_description"]
+                assert writes[0]["operation"] == "OVERRIDDEN"
+            finally:
+                client.close()
 
 
 class TestHappyPath:

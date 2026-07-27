@@ -39,13 +39,16 @@ from graph_traffic_control.context.namespace import Namespace
 from graph_traffic_control.domain.clock import Clock, SystemClock
 from graph_traffic_control.domain.models import WritebackReceipt
 
-#: ``update_description`` requires an ``operation``. ``SET`` is the replace-in-place semantic the
-#: capture/write/re-read/restore cycle depends on: an append-style operation could not restore the
-#: original value exactly. The value is settings-driven (``DATAHUB_DESCRIPTION_OPERATION``) so the
-#: coordinator can correct it on the host without a code change if the pinned server names it
-#: differently. See docs/LIMITATIONS.md — the argument *names* are coordinator-observed, this
-#: particular *value* is not.
-DEFAULT_DESCRIPTION_OPERATION = "SET"
+#: ``update_description`` requires an ``operation``. ``replace`` is the replace-in-place semantic
+#: the capture/write/re-read/restore cycle depends on: an append-style operation could not restore
+#: the original value exactly.
+#:
+#: **This value is now live-confirmed.** It was previously ``SET``, guessed from the aspect
+#: vocabulary because the coordinator supplied the argument *names* but not this *value*. Live
+#: DataHub 1.6.0 **rejected** ``SET``; the same reversible write/re-read/restore cycle then
+#: succeeded with ``replace``. It stays settings-driven via ``DATAHUB_DESCRIPTION_OPERATION`` so a
+#: future server can be accommodated without a code change, but the default is no longer a guess.
+DEFAULT_DESCRIPTION_OPERATION = "replace"
 
 
 class WritebackError(RuntimeError):

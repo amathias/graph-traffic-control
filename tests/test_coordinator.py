@@ -432,7 +432,7 @@ class _WritebackDouble:
         return WritebackReceipt(
             entity_urn=urn,
             aspect="description",
-            operation="SET",
+            operation="replace",
             previous_value="before",
             written_value=note,
             reread_value=note if self.verified else "something else",

@@ -1,10 +1,22 @@
 # Devpost submission copy: Graph Traffic Control
 
 Ready-to-paste text for the submission form. Every claim here is backed by something in this
-repository. Claims that are **not** yet backed by a live run are marked, and must stay marked
-until the coordinator has run the live gates in `COORDINATOR_HANDOFF.md`.
+repository or by the completed live gate recorded in `COORDINATOR_HANDOFF.md`. Anything still
+unverified is marked as such and must stay marked.
 
 ---
+
+## Submission links
+
+| Field | Value |
+|---|---|
+| **Project URL (judges test here)** | <https://traffic.datahub-hackathon.aaronmathias.com> |
+| **Public code repository** | <https://github.com/amathias/graph-traffic-control> |
+| **Licence** | Apache 2.0, `LICENSE` at the repository root |
+| **Demo video** | Public, under three minutes. Recording plan in `docs/DEMO_RUNBOOK.md`. |
+
+The judge console is the project URL's landing page. It needs no login, no DataHub instance, no
+cloud account, and no paid service — one button runs the entire four-agent scenario.
 
 ## Project name
 
@@ -105,34 +117,48 @@ domain fingerprint decides whether a prepared proposal is still safe to commit.
 
 ## Testing it
 
+**Hosted:** open <https://traffic.datahub-hackathon.aaronmathias.com> and press **Run four-agent
+scenario**. Nothing to install, no login, free for the whole judging period.
+
+**Locally**, from a clean checkout:
+
 ```bash
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 gtc-seed && gtc-api          # then open http://127.0.0.1:8105/
 ```
 
-Press **Run four-agent scenario**. No DataHub instance, no cloud account, and no paid service is
-required: the console runs against the recorded graph fixture and states on screen which context
-source it used.
-
-`examples/` holds the three agent proposals and a full transaction trace.
+Either way the console states on screen which context source it used, and `examples/` holds the
+three agent proposals and a full transaction trace.
 
 ## Evidence status — please read
 
-This project distinguishes what has been executed from what has been implemented.
+This project distinguishes what has been executed from what has been implemented, and it has been
+run against real DataHub.
 
-**Executed and verified offline:** the conflict matrix including the zero-overlap lineage
-conflict; the full state machine; lease expiry; pre-commit drift detection; real SQL artifact
-mutation and rollback; the MCP client's wire protocol over real HTTP against a strict localhost
-protocol double; the reversible writeback sequence; readiness; namespace isolation; deterministic
-DataHub seed/reset/capture/restore planning, including the absent-state contract that makes a
-first-time seed of a shared instance recoverable and provably reversible; and the judge console.
+**Verified against live DataHub Core v1.6.0**, on a shared open-source instance:
 
-**Implemented but NOT yet verified against a live DataHub instance:** the MCP tool responses
-themselves, and any writeback receipt from a real entity. All protocol-double results are
-labelled **simulated** wherever they appear.
+- Strong readiness over the **complete** allocated catalogue — 9 entities and 7 lineage edges,
+  including the single edge the A/B conflict depends on.
+- Ingestion of the project's graph: 49 typed metadata change proposals accepted.
+- A **reversible writeback, verified and restored** — capture, write, immediate re-read, restore,
+  with the entity returned to its original description.
+- **Zero impact on anything outside the project's namespace**, measured rather than asserted.
 
-`docs/LIMITATIONS.md` is the authoritative list. Nothing in this submission claims a live
-DataHub read or write that has not happened.
+**Verified offline**, by the committed test suite: the conflict matrix including the zero-overlap
+lineage conflict; the full state machine; lease expiry; pre-commit drift detection; real SQL
+artifact mutation and rollback; the MCP client's wire protocol over real HTTP against a strict
+localhost protocol double; readiness; namespace isolation; deterministic DataHub
+seed/reset/capture/restore planning, including the absent-state contract that makes a first-time
+seed of a shared instance recoverable and provably reversible; and the judge console.
+
+**Still not verified:** the absent-state restore path end to end against a live server (the live
+allocation already existed, so the first-time-seed path was never the live path), structured
+properties as a writeback aspect (unused), and the visual rendering of the judge console.
+
+`docs/LIMITATIONS.md` is the authoritative list, and it distinguishes what was run live from what
+was run against the protocol double. All protocol-double results are labelled **simulated**
+wherever they appear. Nothing in this submission claims a live DataHub read or write that has not
+happened.
 
 ## Claims this project does not make
 

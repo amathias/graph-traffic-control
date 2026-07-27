@@ -603,3 +603,47 @@ enters, and the third where the test suite's shape was the reason it went unnoti
 consistent: a check that is *nearly* right passes every test written by whoever wrote the check.
 Widening a regression to the full set of adversarial values — not just the one that failed in
 production — is what turns a fix into a guarantee.
+
+## ADR-022: The description operation default is `replace`, and it is live-confirmed
+
+**Status:** Accepted
+**Date:** 2026-07-27
+
+`DATAHUB_DESCRIPTION_OPERATION` defaults to `replace`. It previously defaulted to `SET`.
+
+The coordinator supplied the *argument names* for `update_description` as observed contracts. It
+never supplied this *value* — `SET` was inferred from DataHub's aspect vocabulary, where change
+types are `UPSERT`/`DELETE` and setting a value reads naturally as `SET`. That inference was
+plausible, documented as unverified in `docs/LIMITATIONS.md`, and wrong.
+
+Live DataHub Core v1.6.0 **rejected `SET`**. The same reversible capture → write → re-read →
+restore cycle then **succeeded with `replace`**, and the entity was returned to its original
+description. Final receipt SHA-256
+`621e022bc1253990be5fe328da8186ecc6be2d675d8242514d3ef81866db8782`.
+
+### Why the default changes rather than the runbook
+
+The live gate passed because the operator supplied `replace` in the host environment. Leaving the
+default at `SET` would make every future deploy depend on someone remembering an override that is
+not written down in the code — and the failure would be a *rejected writeback*, which surfaces as
+a proposal that cannot reach `COMMITTED`. Making the confirmed value the default means a fresh
+deploy is correct with no environment tuning, and the override remains for a server that wants
+something else.
+
+### Why a regression asserts the literal string
+
+`test_writeback.py` asserts the module default, the settings default, the value a writeback is
+constructed with, and the value shipped in `.env.example`, each against the exact string
+`replace`, plus an explicit assertion that neither default has reverted to `SET`.
+
+Asserting "some non-empty default" would have passed with `SET` in place. The failure mode here is
+not a missing value, it is a **plausible-looking wrong one**, and the entire reversibility
+guarantee rests on the operation having replace-in-place semantics: an append-style operation
+cannot restore a captured original exactly, so a wrong value here silently converts "left as
+found" into "left with our note appended".
+
+### What this does not change
+
+Nothing about the write sequence, the verification signals, or the restore logic. The value is
+still settings-driven and still overridable. The deployed product `5ea880f` is unaffected in
+behaviour — it ran with `replace` supplied in its environment, which is the identical value.

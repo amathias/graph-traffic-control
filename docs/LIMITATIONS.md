@@ -44,38 +44,48 @@ Verified locally, in this workspace, by the committed test suite:
 
 Command results at the handoff commit are recorded in `COORDINATOR_HANDOFF.md`.
 
-## What has NOT been executed
+## What has been executed against live DataHub
 
-**No connection to the shared DataHub instance has been made from this session.** The coordinator
-instructed this chat not to access AWS or deploy, and DataHub reaches the developer machine only
-through an SSM tunnel, which was deliberately not opened.
+**The live gate completed on the shared DataHub Core v1.6.0 instance, and it passed.** It was run
+**by the portfolio coordinator**, who holds the credentials and the SSM access; the evidence below
+is theirs, recorded here in sanitized form. **No project chat ever connected to the instance**, and
+none of it was executed in this workspace.
 
-Therefore the following are **implemented and tested against a protocol double, but unverified
-against a live DataHub Core v1.6.0 instance**:
+Deployed product: `5ea880f61122f052210d014906fe5eab2c356851`.
+
+| Area | Live result |
+|---|---|
+| MCP tool names, argument names, and response envelopes | **Confirmed.** Reads succeeded against the pinned server. |
+| Strong readiness over the complete allocated catalogue | **Passed** — 9 entities and 7 lineage edges, the full fixture graph including the edge the hidden conflict rides on. |
+| Ingestion of the `traffic.` graph | **Applied.** All 49 typed operations of plan `cd44112ebd42b7de` accepted. |
+| The `apply_plan` typed-emitter path | **Executed live.** |
+| `update_description` **`operation` value** | **Resolved.** `SET` — this project's own guess, never coordinator-supplied — was **rejected by live DataHub 1.6.0**. The same reversible write/re-read/restore cycle then **succeeded with `replace`**, which is now the default. Still overridable via `DATAHUB_DESCRIPTION_OPERATION`. |
+| Reversible writeback | **Completed, verified, and restored.** Final receipt SHA-256 `621e022bc1253990be5fe328da8186ecc6be2d675d8242514d3ef81866db8782`. |
+| Cross-project isolation, in production | **`sibling_new_rows=0`.** No other submission's rows were created, altered, or removed. |
+| Rollback position | Pre-gate snapshot `snap-0cb18d5953f50482c`, taken before the gate ran. |
+
+The lineage-index problem that blocked the previous attempt is resolved: readiness now reads all
+7 seeded edges. It was an unindexed graph service, not a data or code defect, and it was fixed by
+reindexing rather than by re-seeding.
+
+## What still has NOT been executed
 
 | Area | Status |
 |---|---|
-| MCP tool names and argument names | Supplied by the coordinator as observed contracts. Implemented exactly; not confirmed by this session against the pinned server. |
-| MCP response envelopes (`structuredContent.result`, `.downstreams.searchResults[*].entity.urn`, `.fields`) | Same: coordinator-observed, implemented exactly, not confirmed here. |
-| `update_description` **`operation` value** | **Not coordinator-supplied.** The argument *name* is; the value is not. Defaults to `SET` and is configurable via `DATAHUB_DESCRIPTION_OPERATION`. Replace-in-place semantics are required, because an append-style operation could not restore the captured original exactly. Confirm this on the host before trusting a restore. |
-| Whether mutation tools are enabled on the deployed bridge | Coordinator states they are; not observed from here. |
-| How the pinned server reports a soft-deleted entity | Both "omitted from `get_entities`" and "returned with `status.removed: true`" are treated as absent. Which one the server actually does is not observed from here. |
-| The pinned versions `acryl-datahub==1.6.0.15` and `mcp==1.28.1` | Declared as the deployment target and asserted by the test suite. **Not installed or imported in this session** — the suite runs without the `datahub` extra, so no code path through either package has been executed here. |
+| Anything at all, from this workspace | **No project chat has connected to the shared instance.** Every result produced here is against the localhost protocol double and is simulated. |
 | Structured properties as a writeback aspect | Not used. Gated behind a smoke test that has not run. |
-| Ingestion of the `traffic.` graph into the shared instance | **Planned, not applied.** `gtc-datahub-seed` produces a guarded, deterministic plan and recipe. No plan in this repository has been applied to a live instance. |
-| The `apply_plan` emitter path | Implemented against the DataHub SDK and guarded, but never executed. It requires the optional `.[datahub]` extra and live credentials. |
-| Any writeback receipt from a real DataHub entity | **None exists.** |
-| The rendered judge console | The payload, script syntax, and element wiring are tested, and the endpoints were exercised against a running server. **The page was not visually confirmed** — no browser tooling was available in this session. |
+| How the pinned server reports a soft-deleted entity | Both "omitted from `get_entities`" and "returned with `status.removed: true`" are treated as absent. The live gate restored rather than exercising an absent-state restore, so which one the server does is still unobserved. Either is handled; a third behaviour would surface as a loud refusal. |
+| The absent-state contract (ADR-016) end to end | Exercised against the protocol double only. The live allocation already existed from an older baseline, so the first-time-seed path was never the live path. |
+| The rendered judge console | The payload, script syntax, and element wiring are tested, and the endpoints were exercised against a running server. **The page has not been visually confirmed** — no browser tooling was available in the sessions that built it. |
 
 **Every result produced against the protocol double is simulated.** The double is strict — it
 rejects any argument set other than the coordinator-observed contract, so an argument-name
 regression fails a test rather than passing quietly — but a strict double still only proves this
-project speaks the contract it claims to. It cannot prove the pinned server answers that way.
+project speaks the contract it claims to. The live gate is what proves the server answers that way.
 
-Unlike the previous candidate, a shape mismatch on the first live run will now surface as a
-**loud, fail-closed error naming the tool and the offending key**, not as silently empty fields.
-That is the intended behaviour: treat the first live run as shape discovery, and expect it to
-either pass or tell you exactly what differs.
+A shape mismatch surfaces as a **loud, fail-closed error naming the tool and the offending key**,
+never as silently empty fields. That is what turned each live failure into a specific diagnosis
+rather than a green endpoint over an empty graph.
 
 ## Scope boundaries
 

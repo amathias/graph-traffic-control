@@ -35,13 +35,13 @@ live EC2 host from this project chat.
 
 | Field | Current value |
 |---|---|
-| Status | `blocked on infrastructure` |
-| Milestone | Live capture and seed succeeded. Lineage read contracts fixed, and the `total` type guard corrected after coordinator review (ADR-021). **The remaining live failure is a DataHub graph-index problem, not a code defect** — confirmed by the coordinator: the graph service was not reindexed after the OpenSearch recovery. Readiness correctly refuses to serve. See "The lineage index is empty" below. |
+| Status | `complete` |
+| Milestone | **The live gate is complete: verified and restored.** Deployed product `5ea880f`. Strong readiness passed with 9 entities and 7 lineage edges, the reversible writeback succeeded with `DATAHUB_DESCRIPTION_OPERATION=replace` after live DataHub 1.6.0 rejected `SET`, and `sibling_new_rows=0`. This build carries the `SET` → `replace` correction, the submission package, and the judge recording plan. |
 | Verified commit/artifact | See "Deployment candidate" below |
 | Build command | `python -m venv .venv && .venv/Scripts/python.exe -m pip install -e ".[dev]"` |
 | DataHub extra | `pip install -e ".[datahub]"` on the host — **pinned exactly** to `acryl-datahub==1.6.0.15` and `mcp==1.28.1` (ADR-017). **Installed in a throwaway local venv this session** to verify the emitter contract against the real library; never pointed at any instance, and no network call was made with it. |
-| Test command | `.venv/Scripts/python.exe -m pytest` — **605 passed, 1 skipped** in 209 s, no network required. The skip is `test_datahub_sdk_pinned.py`, which needs the optional extra. |
-| Test command (with the extra) | `pytest` in a venv that also has `.[datahub]` — **616 passed, 0 skipped**. This is the host configuration. |
+| Test command | `.venv/Scripts/python.exe -m pytest` — **632 passed, 1 skipped** in 175 s, no network required. The skip is `test_datahub_sdk_pinned.py`, which needs the optional extra. |
+| Test command (with the extra) | `pytest` in a venv that also has `.[datahub]` — **643 passed, 0 skipped**. This is the host configuration. |
 | Coverage | `pytest --cov=graph_traffic_control` — **89%** (2715 statements, 291 missed). `demo/datahub_state.py` is now **96%**: the emitter boundary is executed by tests rather than excluded by a `pragma: no cover`, which is what let the blocker through. The largest gap remains `release/archive.py` at 30%: its end-to-end path builds distributions and creates a virtual environment, so it runs as the `gtc-archive-verify` release command rather than in the suite. |
 | Lint command | `.venv/Scripts/python.exe -m ruff check .` — clean |
 | Build/archive check | `gtc-archive-verify` — **8/8 pass**, including a clean-environment wheel install |
@@ -58,22 +58,27 @@ live EC2 host from this project chat.
 | Readiness endpoint | `GET /api/readiness` — 200 seeded (fixture mode), 503 unseeded, 503 in non-local env without credentials, **503 whenever the graph snapshot will not build** (ADR-019), and **503 when seeded lineage edges cannot be read back** (`lineage_incomplete`, ADR-020). Reports `graph_entities`, `graph_edges`, `graph_fingerprint`, `lineage_edges_verified`. |
 | Persistent volumes | `APP_STATE_DIR` (default `demo/state`) holds `transactions.sqlite`, `artifacts/`, `receipts/`, `datahub/` (plans), `judge/` (judge-run state). Disposable and recreated by `gtc-seed`. **SQLite means a single writer: run one replica.** |
 | Long-running workers | None. Single uvicorn process, no background jobs. |
-| DataHub read | **Partially verified live.** The coordinator's live run read the catalogue successfully; the graph read then failed on dashboard downstream lineage, which is fixed here (ADR-019). The fix itself is verified against the protocol double, now corrected to emit the live server's shape. **This session made no connection to the shared instance.** |
-| DataHub writeback | **Not verified live.** Reversible capture → write → re-read → restore, with verification and restoration tracked independently. **No live receipt exists.** |
+| DataHub read | **Verified live.** Strong readiness passed against the shared instance with 9 entities and 7 lineage edges — the complete allocated catalogue and every seeded edge, including the one the hidden conflict depends on. Run by the coordinator; **this session made no connection to the shared instance.** |
+| DataHub writeback | **Verified live, and restored.** Reversible capture → write → re-read → restore completed with `operation=replace`. Final receipt SHA-256 `621e022bc1253990be5fe328da8186ecc6be2d675d8242514d3ef81866db8782`. Pre-gate snapshot `snap-0cb18d5953f50482c`. |
+| Cross-project isolation, live | **`sibling_new_rows=0`.** No sibling submission's rows were created, altered, or removed by the gate. |
 | DataHub ingestion | **Applied live by the coordinator.** All 49 typed operations of plan `cd44112ebd42b7de` were accepted by the shared instance. This build changes no plan — the fingerprint is byte-identical, so **do not seed again**. |
 | DataHub emission | **Verified against the pinned SDK, offline.** All 103 operations across the seed, reset, and both restore plans construct as real typed aspects and serialise to the bytes the emitter would send. No emitter was ever connected. |
-| Blockers | **DataHub's graph/lineage index does not return the seeded lineage.** Entities and aspects were accepted; only the index is behind. A reindex of the graph service is required before this project can serve live — no code change will fix it, and none should. The proposal/writeback leg has not been run live and has no receipt. |
-| Evidence produced | 605 passing tests offline / 616 with the extra; live capture and seed evidence recorded below; `examples/`; sanitized receipts under `APP_STATE_DIR/receipts`; `docs/DECISIONS.md` ADR-001..021; `docs/LIMITATIONS.md`; `docs/SUBMISSION.md`; `docs/DEMO_RUNBOOK.md` |
+| Blockers | **None.** The lineage index was reindexed and readiness now reads all 7 seeded edges; the writeback leg ran and produced a verified, restored receipt. |
+| Evidence produced | 632 passing tests offline / 643 with the extra; **completed live gate evidence recorded below**; `examples/`; sanitized receipts under `APP_STATE_DIR/receipts`; `docs/DECISIONS.md` ADR-001..022; `docs/LIMITATIONS.md`; `docs/SUBMISSION.md`; `docs/DEMO_RUNBOOK.md` |
 
 ## Deployment candidate
 
 | Field | Value |
 |---|---|
 | Branch | `main` |
-| Product candidate | `5ea880f` — full SHA `5ea880f61122f052210d014906fe5eab2c356851`. Supersedes `caf03d4`, whose `total` type guard accepted a boolean or float zero (ADR-021). **Deploying it will not make the instance ready** — the remaining failure is a DataHub graph-index problem needing a reindex. Deploy only; do not capture or seed. |
+| Deployed product | **`5ea880f61122f052210d014906fe5eab2c356851`** (`5ea880f`) — this is what ran the live gate and what is serving. |
+| Public app URL | <https://traffic.datahub-hackathon.aaronmathias.com> |
+| Public repository | <https://github.com/amathias/graph-traffic-control> |
+| This build vs the deployed product | The deployed `5ea880f` still defaults `DATAHUB_DESCRIPTION_OPERATION` to `SET`; the gate passed because the coordinator supplied `replace` **in the host environment**. This build makes `replace` the default, so a redeploy no longer depends on that override being remembered. **No behaviour change when the override is set** — the value is identical. Everything else here is documentation and tests. |
+| Reseed/capture | **Do not capture and do not seed.** The instance is correctly seeded and the pre-seed capture from the live run is the only correct one. |
 | Tree state | Clean at that commit; `git status` empty |
 | Pushed to origin | `origin/main` |
-| Verified at that commit | **605 tests pass, 1 skipped** offline and **616 pass, 0 skipped** with the pinned extra, **89% coverage** (2715 statements, 291 missed), `ruff check` clean, `gtc-archive-verify` **8/8** (including a clean-environment wheel install), `gtc-safety-scan` **0 blockers / 0 warnings** across 84 tracked files, four-agent scenario runs end to end, judge workflow reproduces the result below unchanged, health 200, readiness 200 and `/api/graph` 200 seeded (fixture mode) |
+| Verified at this closeout commit | **632 tests pass, 1 skipped** offline and **643 pass, 0 skipped** with the pinned extra, **89% coverage** (2715 statements, 291 missed), `ruff check` clean, `gtc-archive-verify` **8/8** (including a clean-environment wheel install), `gtc-safety-scan` **0 blockers / 0 warnings** across 84 tracked files, submission links and relative-link/placeholder checks pass, four-agent scenario runs end to end, judge workflow reproduces the result below unchanged, health 200, readiness 200 and `/api/graph` 200 seeded (fixture mode) |
 
 ### The seed plan fingerprint has changed
 
@@ -356,10 +361,34 @@ Coordinator verification passed the suite and Ruff but found two blockers. Both 
 
 Neither change touches the product behaviour the previous candidate was verified on.
 
-## Live verification the coordinator must run on the host
+## Live verification: COMPLETE
 
-None of these have been executed. They are the remaining gate between this candidate and a
-truthful "reads and writes real DataHub context" claim.
+**The live gate ran to completion and passed.** It was executed by the portfolio coordinator, who
+holds the credentials and SSM access. No project chat connected to the shared instance at any
+point, including this one.
+
+Deployed product: **`5ea880f61122f052210d014906fe5eab2c356851`**.
+
+| Step | Result |
+|---|---|
+| Strong readiness over the complete catalogue | **Passed — 9 entities, 7 lineage edges.** The full fixture graph, including the single edge the hidden conflict depends on. |
+| Lineage index | **Resolved.** The reindex fixed it; the seeded data was never wrong and was not re-seeded. |
+| `update_description` `operation` | `SET` **rejected** by live DataHub 1.6.0. **`replace` accepted.** |
+| Reversible write → re-read → restore | **Succeeded, verified, and restored** with `operation=replace`. |
+| Final receipt SHA-256 | `621e022bc1253990be5fe328da8186ecc6be2d675d8242514d3ef81866db8782` |
+| Pre-gate snapshot | `snap-0cb18d5953f50482c` |
+| Cross-project isolation | **`sibling_new_rows=0`** — no sibling submission's rows created, altered, or removed. |
+
+The `SET` → `replace` correction is carried in this build: `config.py`, `writeback/datahub.py`,
+`.env.example`, the tests, and this document. `SET` was never a coordinator-supplied value — the
+argument *names* were, this *value* was a guess from the aspect vocabulary, and it was wrong. A
+regression now asserts the default is `replace` and has not reverted, because the failure mode is
+a plausible-looking wrong string and the entire restore guarantee depends on replace-in-place
+semantics.
+
+### Historical: what the gate was asked to run
+
+Retained for provenance. All of it has now been executed.
 
 1. `GET /api/readiness` with `DATAHUB_MCP_URL` and `DATAHUB_TOKEN` set. Expect `mode: "live"` and
    `status: "verified"`. Any other status is a real failure, not a configuration nuisance.
@@ -389,9 +418,8 @@ truthful "reads and writes real DataHub context" claim.
    `verified absent: N ...` line, then confirm in the DataHub UI that no `traffic.` entity
    remains listed.
 6. **Confirm the `update_description` `operation` value.** The argument *names* were supplied by
-   the coordinator; this *value* was not. It defaults to `SET` and is configurable via
-   `DATAHUB_DESCRIPTION_OPERATION`. It must have replace-in-place semantics, or restoration
-   cannot return the captured original exactly.
+   the coordinator; this *value* was not. **Answered:** the then-default `SET` was rejected and
+   `replace` was accepted, so `replace` is the default from this build onward.
 7. Re-record `demo/fixtures/graph-traffic-control/graph.json` from the live instance so the
    offline suite reflects real shapes.
 8. Open `/` and confirm the judge console renders. **No browser tooling was available in this
@@ -411,8 +439,9 @@ exactly what differs.
 | Plans can actually be emitted | Verified offline against the real `acryl-datahub==1.6.0.15` — all 103 operations across seed, reset, and both restore plans construct as typed aspects and serialise to the emitter's wire form (ADR-018). **No emitter was connected and no instance was contacted.** |
 | Distributions build and install cleanly | Verified — `gtc-archive-verify` 8/8, wheel installed and run in a fresh venv outside the source tree |
 | Demo seed and reset deterministic | Verified — repeated seed byte-identical; reset idempotent and fixture-preserving; DataHub plans byte-identical with a stable fingerprint |
-| Reads real context from shared DataHub | **Partially verified live** — capture read all 9 allocated entities from the shared instance; the graph read failed on dashboard lineage and is fixed here (ADR-019). Not yet re-run live. |
-| Performs and verifies supported writeback | **Not verified** — implemented, reversible, verification and restoration tracked independently; no live receipt |
+| Reads real context from shared DataHub | **Verified live** — strong readiness passed with 9 entities and 7 lineage edges, the complete allocated catalogue and every seeded edge |
+| Performs and verifies supported writeback | **Verified live and restored** — reversible write → re-read → restore with `operation=replace`; receipt SHA-256 `621e022bc1253990be5fe328da8186ecc6be2d675d8242514d3ef81866db8782` |
+| Leaves sibling submissions untouched | **Verified live** — `sibling_new_rows=0` across the gate |
 | Namespace and reset isolation tests pass | Verified — every surface that can reach shared state refuses all four sibling allocations (`lifeboat.`, `license.`, `forgetme.`, `fuzzer.`), unknown URN shapes, foreign `schemaField` parents, foreign domains and tags, and foreign URNs smuggled inside lineage and dashboard-input payloads |
 | Global reset is impossible | Verified — reset **and restore** take an explicit scope and accept only `namespace`; every removal is a soft delete addressed to an exact allowlisted URN; no surface performs a search or wildcard read; ingestion recipe disables stale-entity removal |
 | First-time seeding is recoverable | Verified — absence of the exact allocation can be captured deliberately, seed creates exactly that set, restore returns it to a verified soft-deleted state, and partial, extra, foreign, ambiguous, and version-mismatched captures are refused (ADR-016) |
@@ -466,7 +495,7 @@ these for coordinator awareness** since they are not in the shared contract:
 | Variable | Default | Why it exists |
 |---|---|---|
 | `DATAHUB_DOMAIN_URN` | `urn:li:domain:graph-traffic-control` | Readiness and the seed plan need the domain's URN, not only its display name. Overridable if the shared instance minted a different id. |
-| `DATAHUB_DESCRIPTION_OPERATION` | `SET` | The `operation` argument for `update_description`. The argument *name* is coordinator-observed; this *value* is not, so it is configurable rather than hardcoded and can be corrected on the host without a code change. |
+| `DATAHUB_DESCRIPTION_OPERATION` | `replace` | The `operation` argument for `update_description`. **Live-confirmed:** DataHub 1.6.0 rejected the earlier `SET` default (this project's guess — the argument *name* was coordinator-observed, the *value* never was) and accepted `replace`, which completed the write/re-read/restore cycle. Still overridable for a different server. |
 
 See `.env.example`. No secrets committed; `gtc-safety-scan` enforces this.
 

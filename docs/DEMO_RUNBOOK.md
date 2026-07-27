@@ -11,6 +11,13 @@ segment 6, never from segment 2 — segment 2 is the project's entire thesis.
 
 ## Before recording
 
+Record against **either** the hosted console or a local one. The hosted URL is what judges will
+open, so it is the honest thing to show; a local run is the safer fallback if the network is
+unreliable on the day. Both render the identical scenario.
+
+- Hosted: <https://traffic.datahub-hackathon.aaronmathias.com>
+- Local:
+
 ```bash
 gtc-reset && gtc-seed              # deterministic; repeated runs are byte-identical
 gtc-api                            # http://127.0.0.1:8105/
@@ -18,7 +25,8 @@ gtc-api                            # http://127.0.0.1:8105/
 
 Checklist:
 
-- [ ] Browser at `http://127.0.0.1:8105/`, zoomed so proposal text is legible at 1080p.
+- [ ] Browser at the hosted URL or `http://127.0.0.1:8105/`, zoomed so proposal text is legible
+      at 1080p.
 - [ ] Window sized so the lineage graph and the agent panel are both visible without scrolling.
 - [ ] `gtc-demo` run once beforehand to warm the page; then **reload**, so recording starts from
       the unpressed state.
@@ -125,32 +133,39 @@ Straight from the `HACKATHON_RULES.md` scoring checklist:
 - [ ] The audit log and a receipt.
 - [ ] No secrets, hostnames, or copyrighted music.
 
-## If the demo is run against live DataHub
+## If you record against live DataHub
 
-The recorded demo is fixture-backed and needs none of this. A live run against the shared instance
-does, and it must happen in this order — capture first, always. A capture taken *after* a seed
-records this project's own rows as the state to return the instance to, and the shared catalogue
-never gets clean again.
+> **Do not run `gtc-datahub-capture` or `gtc-datahub-seed --apply`.** The shared instance is
+> already correctly seeded, and the live gate's pre-seed capture is the only correct one. A
+> capture taken now would record this project's own rows as the state to restore to, and the
+> shared catalogue would never get clean again. Recording needs **read-only** access; nothing in
+> the shot list requires a seed.
+
+The fixture-backed take needs none of this and is the recommended one — it is deterministic, it
+cannot fail on the day, and the console labels its own context source honestly either way.
+
+If you do record live, sanity-check first and keep it read-only:
 
 ```bash
-gtc-datahub-capture --allow-absent   # first run: the traffic. namespace is absent, so record that
-gtc-datahub-seed --apply             # inspect seed_plan.json first; it is inert and fingerprinted
-# ... demo, writeback, receipts ...
-gtc-datahub-restore --apply          # soft-deletes them again, then re-reads and proves it
+curl -s localhost:8105/api/readiness   # expect 200, graph_entities 9, graph_edges 7
+curl -s localhost:8105/api/graph       # expect 200, 9 entities, 7 edges
 ```
 
-Every artifact lands under `APP_STATE_DIR/datahub/`:
+An edgeless 200 is a failure even though it is a 200 — the whole thesis rides on an edge. If
+readiness returns 503 `lineage_incomplete`, the graph index needs reindexing; **do not re-seed.**
+
+Artifacts, if you need to inspect them, live under `APP_STATE_DIR/datahub/`:
 
 | File | What it is |
 |---|---|
 | `pre_seed_capture.json` | The pre-seed state of every allocated entity, each recorded `present` or `absent`. Restore reads this exact path and no other. |
-| `seed_plan.json` | The inert seed plan. Inspect before `--apply`; its fingerprint is printed by the command. |
+| `seed_plan.json` | The inert seed plan. Fingerprint `cd44112ebd42b7de`, already applied. |
 | `reset_plan.json` | Namespace-scoped soft-delete plan. |
 | `restore_plan.json` | The return-to-captured-state plan. |
 | `ingestion_recipe.yaml` | Namespace-scoped recipe, stale-entity removal disabled. |
 
-If `--apply` fails part way through, the error states how many operations were applied before the
-failure. That number is real: those operations are already in the shared instance. Run
+If an `--apply` ever fails part way through, the error states how many operations were applied
+before the failure. That number is real: those operations are already in the shared instance. Run
 `gtc-datahub-restore --apply` before retrying.
 
 ## Honesty rules for the narration
@@ -158,12 +173,23 @@ failure. That number is real: those operations are already in the shared instanc
 Non-negotiable, from `AGENTS.md` and the rules' truthful-claims requirement:
 
 - The console states its context source on screen. **Say what it says.** If it reads `fixture`,
-  do not narrate "reading from our live DataHub instance".
-- Do not show a DataHub UI screenshot implying a live writeback unless one has actually been
-  performed and its receipt exists.
+  do not narrate "reading from our live DataHub instance" over that take.
 - "Simulated" belongs on anything produced against the protocol double.
 - Do not claim distributed ACID transactions, general multi-agent coordination, or exactly-once
   effects.
+
+**What you may now truthfully claim**, because the live gate completed and is recorded in
+`COORDINATOR_HANDOFF.md`:
+
+- That the project has been run against a real open-source DataHub instance.
+- That it read the complete allocated catalogue live — 9 entities and 7 lineage edges.
+- That it performed a **reversible writeback that was verified and restored** on a real entity.
+- That it left every other project on the shared instance untouched.
+
+Phrase these in the past tense as a completed verification, not as something happening in the
+take, unless the take really is live. A DataHub UI screenshot of the writeback is now fair to
+show — the receipt exists. Saying *"this recording is fixture-backed; the live run is documented
+in the repository"* costs three seconds and is exactly true.
 
 ## After recording
 
