@@ -1,46 +1,39 @@
 # Graph Traffic Control
 
-## Submission title
-
 **Graph Traffic Control: Transactional Coordination for Data Agents**
 
-## Tagline
+[Open the live judge console](https://traffic.datahub-hackathon.aaronmathias.com) ·
+[View the source](https://github.com/amathias/graph-traffic-control) ·
+[Follow the under-three-minute recording runbook](docs/DEMO_RUNBOOK.md)
 
-Let many data agents move quickly without colliding in the context graph.
+Demo video: **pending recording and public upload**. The repository does not claim that a video
+exists yet.
 
-## One-sentence pitch
-
-Graph Traffic Control uses DataHub lineage and governance context to detect hidden conflicts between autonomous data-agent changes, coordinate safe execution with a semantic two-phase commit, and preserve an auditable record for the next agent.
-
-## Basic idea
+Graph Traffic Control uses DataHub lineage and governance context to detect hidden conflicts between
+autonomous data-agent changes, coordinate safe execution with a semantic two-phase commit, and
+preserve an auditable record for the next agent.
 
 Multiple agents can independently produce valid changes that become invalid when combined. One agent renames a column while another builds a metric on the old name; a third alters an upstream model whose blast radius overlaps both. File locks cannot see these semantic conflicts.
 
 Graph Traffic Control requires every agent to propose its read set, write set, expected graph version, evidence, and intended change. The coordinator queries DataHub for indirect lineage collisions, runs policy and impact checks during a prepare phase, permits unrelated work in parallel, sequences or rejects conflicts, verifies the commit, and writes the outcome back to DataHub.
 
-## Why it can win
+## Architecture
 
-- **Forward-looking problem:** Agent coordination becomes essential as organizations deploy many autonomous data agents.
-- **Deep DataHub use:** The context graph reveals conflicts that source-file or table-name locking misses.
-- **Memorable mechanism:** “Semantic two-phase commit” is technical, explainable, and demoable.
-- **Visible multi-agent demo:** Three agents propose work; two have a hidden downstream collision while the third safely proceeds.
-- **Writes knowledge back:** Future agents inherit decisions, leases, change evidence, and updated context.
+```mermaid
+flowchart LR
+    A["Autonomous agent proposals"] --> C["Semantic transaction coordinator"]
+    D["DataHub lineage + governance context"] --> C
+    C --> P["Prepare, conflict policy, leases"]
+    P --> H["Approval and graph-version recheck"]
+    H --> X["Commit or rollback adapters"]
+    X --> R["Audit receipts + DataHub writeback"]
+```
 
-## Primary user
+## Three-step judge path
 
-Data platform teams operating autonomous analytics, migration, governance, and code-generation agents.
-
-## Challenge category
-
-Primary: **Agents That Do Real Work**
-
-## The memorable demo moment
-
-Three agents request commits at once. DataHub lineage reveals that a schema rename and a metric change conflict even though they touch different files. The coordinator pauses and rebases one, allows the unrelated change through, and commits a verified audit trail.
-
-## Name rationale
-
-“Graph Traffic Control” preserves the air-traffic metaphor while identifying DataHub's graph as the coordination surface. “Semantic two-phase commit” remains the differentiating mechanism, not an overloaded brand name.
+1. Open the live console and run the four-agent scenario.
+2. Watch DataHub lineage expose the hidden rename/metric collision while unrelated work proceeds.
+3. Inspect approval, lease, commit, rollback, verification, and append-only audit evidence.
 
 ## Quickstart
 

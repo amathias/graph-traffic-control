@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install project and pinned DataHub clients
+        run: python -m pip install -e ".[dev,datahub]"
+      - name: Lint
+        run: python -m ruff check .
+      - name: Test
+        run: python -m pytest
+      - name: Scan the publishable file set
+        run: gtc-safety-scan

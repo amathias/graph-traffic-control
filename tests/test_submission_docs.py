@@ -24,6 +24,7 @@ REPO_URL = "https://github.com/amathias/graph-traffic-control"
 #: Documents a judge or the coordinator actually reads.
 SUBMISSION_DOCS = [
     "README.md",
+    "SUBMISSION.md",
     "COORDINATOR_HANDOFF.md",
     "docs/SUBMISSION.md",
     "docs/LIMITATIONS.md",
@@ -53,12 +54,13 @@ def _flat(name: str) -> str:
 class TestThePublicUrlsArePresent:
     """A judge must be able to reach the running app and the source from the submission copy."""
 
-    @pytest.mark.parametrize("document", ["README.md", "docs/SUBMISSION.md"])
+    @pytest.mark.parametrize("document", ["README.md", "SUBMISSION.md", "docs/SUBMISSION.md"])
     def test_the_app_url_is_published(self, document):
         assert APP_URL in _read(document)
 
-    def test_the_repository_url_is_published(self):
-        assert REPO_URL in _read("docs/SUBMISSION.md")
+    @pytest.mark.parametrize("document", ["README.md", "SUBMISSION.md", "docs/SUBMISSION.md"])
+    def test_the_repository_url_is_published(self, document):
+        assert REPO_URL in _read(document)
 
     def test_the_handoff_records_both_urls(self):
         text = _read("COORDINATOR_HANDOFF.md")
