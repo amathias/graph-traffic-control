@@ -21,6 +21,7 @@ restore cycle in :mod:`graph_traffic_control.writeback`.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -51,10 +52,19 @@ from graph_traffic_control.txn.coordinator import Coordinator, CoordinatorError
 from graph_traffic_control.txn.store import TransactionStore
 from graph_traffic_control.writeback.datahub import ReversibleDescriptionWriteback
 
+
+def _interactive_docs_enabled(app_env: str) -> bool:
+    return app_env.casefold() in {"development", "local", "test"}
+
+
+_docs_enabled = _interactive_docs_enabled(os.getenv("APP_ENV", "local"))
 app = FastAPI(
     title="Graph Traffic Control",
     version=__version__,
     description="Transactional coordination for autonomous data agents, powered by DataHub.",
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
 )
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]

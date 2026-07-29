@@ -101,7 +101,21 @@
     background: color-mix(in srgb, var(--info) 10%, transparent);
     border-radius: 8px; padding: 10px 14px; font-size: 12.5px; margin-bottom: 18px;
   }
+  .demo-banner {
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 18px;
+    align-items: center; border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--line));
+    border-left: 5px solid var(--warn); background: color-mix(in srgb, var(--warn) 11%, transparent);
+    border-radius: 8px; padding: 16px 18px; font-size: 13.5px; margin-bottom: 18px;
+  }
+  .demo-banner > strong { color: var(--warn); font-size: 16px; letter-spacing: .08em; }
+  .demo-banner code { color: var(--accent); }
+  .demo-links { display: flex; gap: 14px; white-space: nowrap; }
+  .demo-links a { color: var(--text); font: 700 11px/1.4 ui-monospace, monospace; text-underline-offset: 4px; }
   .err { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
+  @media (max-width: 760px) {
+    .demo-banner { grid-template-columns: 1fr; }
+    .demo-links { white-space: normal; }
+  }
 </style>
 </head>
 <body>
@@ -117,6 +131,11 @@
 </header>
 
 <main>
+  <aside class="demo-banner" role="note" aria-label="Public demo notice">
+    <strong>PUBLIC DEMO</strong>
+    <span>This judge console coordinates deterministic proposals against disposable <code>traffic.*</code> artifacts and an isolated live DataHub graph. The scenario demonstrates prepare, conflict, approval, commit, and rollback without touching production or personal data.</span>
+    <span class="demo-links"><a href="https://github.com/amathias/graph-traffic-control#api-documentation" target="_blank" rel="noreferrer">Source, API &amp; self-hosting</a></span>
+  </aside>
   <div class="banner" id="status">
     Press <b>Run four-agent scenario</b>. Four agents submit structured proposals; the coordinator
     expands their impact through DataHub lineage, blocks the pair that collide through a dependency

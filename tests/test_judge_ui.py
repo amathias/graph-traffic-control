@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from graph_traffic_control import api
-from graph_traffic_control.api import UI_INDEX, app
+from graph_traffic_control.api import UI_INDEX, _interactive_docs_enabled, app
 from graph_traffic_control.config import get_settings
 
 
@@ -43,11 +43,24 @@ class TestPageIsSelfContained:
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
         assert "Graph Traffic Control" in response.text
+        assert "PUBLIC DEMO" in response.text
+        assert "traffic.*" in response.text
+        assert "without touching production or personal data" in response.text
+
+    def test_interactive_api_docs_are_local_only(self):
+        assert _interactive_docs_enabled("local") is True
+        assert _interactive_docs_enabled("test") is True
+        assert _interactive_docs_enabled("hackathon") is False
+        assert _interactive_docs_enabled("production") is False
 
     def test_no_external_asset_is_referenced(self):
         body = UI_INDEX.read_text(encoding="utf-8")
-        offenders = re.findall(r'(?:src|href)\s*=\s*["\'](https?:|//)', body)
+        offenders = re.findall(
+            r'<(?:script|img|link)\b[^>]*\b(?:src|href)\s*=\s*["\'](https?:|//)',
+            body,
+        )
         assert offenders == [], f"external assets break an offline judge: {offenders}"
+        assert "https://github.com/amathias/graph-traffic-control#api-documentation" in body
 
     def test_no_remote_fetch_targets(self):
         body = UI_INDEX.read_text(encoding="utf-8")

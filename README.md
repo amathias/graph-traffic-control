@@ -111,6 +111,13 @@ rather than turned into a wrong restore. See ADR-016 in `docs/DECISIONS.md`.
 
 ## What it does
 
+### API documentation
+
+Local, development, and test runs expose Swagger, ReDoc, and the generated OpenAPI document at
+`/docs`, `/redoc`, and `/openapi.json`. The unauthenticated public judge deployment disables those
+interactive routes. The public source, models, tests, CLI commands, and local OpenAPI output remain
+the complete integration and self-hosting reference.
+
 Agents submit structured proposals declaring intent, read set, write set, expected entity
 versions, an executable action, a validation plan, and evidence. The coordinator then:
 
