@@ -1,5 +1,20 @@
 # Coordinator Handoff: Graph Traffic Control
 
+## 2026-07-29 public-demo boundary closeout
+
+| Field | Verified value |
+|---|---|
+| Exact deployed product | `32e0c632c85b51a1d5311e042e3b3d767b25c7ff` |
+| Public endpoint | `https://traffic.datahub-hackathon.aaronmathias.com` |
+| Public acceptance | Root, health, and strong readiness returned 200 |
+| Browser acceptance | One prominent `PUBLIC DEMO` notice rendered above the workflow and identified the disposable `traffic.*` artifacts, isolated live graph, no-production/no-personal-data boundary, and source/API/self-hosting link |
+| Hosted API documentation | `/docs`, `/redoc`, and `/openapi.json` returned 404 in `APP_ENV=hackathon`; local/development/test documentation remains enabled |
+| Verification | 638 tests passed, Ruff passed, GitHub Actions passed, and exact `main` matched `origin/main` before promotion |
+
+The standard deployment ran `gtc-seed`, which rebuilds only the local fixture manifest and SQL
+artifacts. It did not run `gtc-datahub-seed`, reseed the shared catalog, or change the preserved
+live write/re-read/restore evidence.
+
 ## Relationship to the portfolio coordinator
 
 This project chat owns Graph Traffic Control's product, code, tests, demo, evidence, and
