@@ -4,6 +4,10 @@
 
 Graph Traffic Control is a DataHub-powered coordinator for autonomous data agents. Agents submit structured read/write proposals; the coordinator expands their semantic impact through lineage, detects hidden conflicts, permits unrelated work in parallel, enforces a prepare/commit-or-abort lifecycle, validates changes, and records the result for future agents.
 
+The public recording uses the clearly labeled isolated fixture scenario. Live DataHub context
+loading and reversible outcome writeback were verified separately and should be described as
+separate evidence.
+
 ## Three-minute demo target
 
 Aim for **2 minutes 35 seconds to 2 minutes 45 seconds**.
@@ -16,9 +20,12 @@ Show Agent A, B, and C proposals together.
 
 ### 0:18–0:50 — DataHub exposes the collision
 
-Show explicit read/write sets, the DataHub graph expansion, and the shortest path connecting A's upstream rename to B's downstream metric.
+Show explicit read/write sets, the fixture graph expansion, and the shortest path connecting A's
+upstream rename to B's downstream metric.
 
-> The coordinator uses DataHub lineage, schemas, versions, ownership, and criticality to detect a conflict that file locks cannot see.
+> The scenario uses the same isolated graph contract that the live provider loads from DataHub:
+> lineage, schemas, versions, ownership, and criticality reveal a conflict that file locks cannot
+> see.
 
 ### 0:50–1:22 — Prepare phase
 
@@ -36,11 +43,12 @@ Let C execute and commit while A proceeds. Show B waiting or being rejected as s
 
 Commit A, show B fail the pre-commit version check, then show the prepared rebase/resubmission and validation.
 
-> The coordinator rechecks DataHub context immediately before commit. Stale work fails closed, then receives a concrete resolution.
+> The coordinator rechecks graph context immediately before commit. Stale work fails closed, then
+> receives a concrete resolution.
 
-### 2:25–2:40 — Writeback and close
+### 2:25–2:40 — Evidence and close
 
-Show audit timeline and DataHub result.
+Show the audit timeline, then identify the separate live DataHub write/reread/restore proof.
 
 > Graph Traffic Control gives autonomous data agents a semantic two-phase commit—and leaves evidence for the next agent.
 
@@ -60,16 +68,16 @@ Existing multi-agent coordinators focus on files, tasks, and worktrees. This pro
 
 ### DataHub usage to state explicitly
 
-- Reads lineage, schemas, owners, criticality, and expected entity context.
-- Uses the graph to expand impact and prove indirect conflicts.
-- Rechecks graph state before commit.
-- Writes supported transaction outcome/evidence context back to DataHub.
+- The live provider reads lineage, schemas, owners, criticality, and expected entity context.
+- The graph expands impact and proves indirect conflicts.
+- The coordinator rechecks graph state before commit.
+- A separate live exercise proved supported transaction outcome write/reread/restore behavior.
 
 ## Judging evidence map
 
 | Criterion | What judges should see |
 |---|---|
-| Use of DataHub | Shortest lineage path proves hidden conflict; graph recheck and writeback |
+| Use of DataHub | Live graph contract and reversible writeback proof, with the public fixture boundary labeled |
 | Technical execution | Strict proposals, state machine, leases/versions, safe concurrency, validation |
 | Originality | Semantic transaction coordinator rather than file/worktree locking |
 | Real-world usefulness | Prevents conflicting autonomous data changes without serializing all work |
@@ -102,5 +110,5 @@ Prefer: “Coordinates the demonstrated data-agent changes using deterministic g
 - [ ] The indirect conflict path is visually obvious.
 - [ ] Agent C visibly proceeds without waiting.
 - [ ] Stale-state failure and resolution are shown.
-- [ ] DataHub input and writeback are visible.
+- [ ] The fixture boundary and separate live DataHub evidence are stated clearly.
 - [ ] No secrets or copyrighted music appears.

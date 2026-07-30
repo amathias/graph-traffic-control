@@ -42,7 +42,7 @@ Verified locally, in this workspace, by the committed test suite:
 - The judge console's payload, self-containment, script syntax, and element wiring.
 - Public-release safety scanning and archive verification, including a clean-environment install.
 
-Command results at the handoff commit are recorded in `COORDINATOR_HANDOFF.md`.
+Operational verification details are recorded in `COORDINATOR_HANDOFF.md`.
 
 ## What has been executed against live DataHub
 
@@ -51,18 +51,16 @@ Command results at the handoff commit are recorded in `COORDINATOR_HANDOFF.md`.
 is theirs, recorded here in sanitized form. **No project chat ever connected to the instance**, and
 none of it was executed in this workspace.
 
-Deployed product: `5ea880f61122f052210d014906fe5eab2c356851`.
-
 | Area | Live result |
 |---|---|
 | MCP tool names, argument names, and response envelopes | **Confirmed.** Reads succeeded against the pinned server. |
 | Strong readiness over the complete allocated catalogue | **Passed** — 9 entities and 7 lineage edges, the full fixture graph including the edge the hidden conflict rides on. |
-| Ingestion of the `traffic.` graph | **Applied.** All 49 typed operations of plan `cd44112ebd42b7de` accepted. |
+| Ingestion of the `traffic.` graph | **Applied.** All 49 typed metadata operations were accepted. |
 | The `apply_plan` typed-emitter path | **Executed live.** |
 | `update_description` **`operation` value** | **Resolved.** `SET` — this project's own guess, never coordinator-supplied — was **rejected by live DataHub 1.6.0**. The same reversible write/re-read/restore cycle then **succeeded with `replace`**, which is now the default. Still overridable via `DATAHUB_DESCRIPTION_OPERATION`. |
-| Reversible writeback | **Completed, verified, and restored.** Final receipt SHA-256 `621e022bc1253990be5fe328da8186ecc6be2d675d8242514d3ef81866db8782`. |
-| Cross-project isolation, in production | **`sibling_new_rows=0`.** No other submission's rows were created, altered, or removed. |
-| Rollback position | Pre-gate snapshot `snap-0cb18d5953f50482c`, taken before the gate ran. |
+| Reversible writeback | **Completed, verified, and restored.** |
+| Cross-project isolation | **`sibling_new_rows=0`.** No sibling project gained metadata rows during the exercise. |
+| Rollback position | A pre-gate backup was captured before the exercise. |
 
 The lineage-index problem that blocked the previous attempt is resolved: readiness now reads all
 7 seeded edges. It was an unindexed graph service, not a data or code defect, and it was fixed by

@@ -1,8 +1,7 @@
 # Devpost submission copy: Graph Traffic Control
 
-Ready-to-paste text for the submission form. Every claim here is backed by something in this
-repository or by the completed live gate recorded in `COORDINATOR_HANDOFF.md`. Anything still
-unverified is marked as such and must stay marked.
+Ready-to-paste text for the submission form. Every claim here is backed by the public product,
+repository, or completed live verification. Anything still unverified is marked as such.
 
 ---
 
@@ -16,7 +15,9 @@ unverified is marked as such and must stay marked.
 | **Demo video** | <https://youtu.be/cPSkHw8bR9I> (2:13, public, English captions) |
 
 The judge console is the project URL's landing page. It needs no login, no DataHub instance, no
-cloud account, and no paid service — one button runs the entire four-agent scenario.
+cloud account, and no paid service — one button runs the entire four-agent scenario against a
+clearly labeled, isolated fixture graph. Live DataHub read and writeback behavior was verified
+separately.
 
 ## Project name
 
@@ -59,20 +60,22 @@ Agents submit structured change proposals — identity, intent, explicit read an
 expected entity versions, an executable action, a validation plan, a requested lease, and risk
 declaration. The coordinator then:
 
-1. **Expands** each proposal's declared sets through DataHub lineage, schemas, ownership, tags,
-   and domain, within a bounded depth.
+1. **Expands** each proposal's declared sets through lineage, schemas, ownership, tags, and domain,
+   within a bounded depth. Live mode reads that context from DataHub; the public one-button scenario
+   uses the equivalent isolated fixture graph.
 2. **Detects conflicts** against a documented eight-row matrix — including the
    **lineage-mediated conflict between A and B, who share no declared URN** — and reports the
-   shortest directed DataHub path that proves each one.
+   shortest directed lineage path that proves each one.
 3. **Prepares** safe work: issues expiring leases and a prepared token carrying a fingerprint of
    the subgraph the proposal depends on. C prepares and commits immediately; it is not queued
    behind the revenue branch.
 4. **Requires approval** for high-blast-radius changes, routed from DataHub criticality.
 5. **Re-reads the graph immediately before commit** and fails closed on any drift.
-6. **Executes** the real artifact change, validates it, and **verifies** it — the file is read
-   back from disk, and the DataHub writeback is read back from DataHub. A proposal is not marked
-   committed until both are positively confirmed.
-7. **Writes the outcome back to DataHub** reversibly: capture, write, immediate re-read, restore.
+6. **Executes** the artifact change, validates it, and **verifies** it by reading the file back
+   from disk.
+7. **Supports reversible DataHub outcome writeback** through capture, write, immediate reread,
+   and restore. That path was verified separately against live DataHub and is not performed by the
+   public fixture scenario.
 8. **Audits** every state transition in an append-only log, with receipts as evidence.
 
 ## What makes it original
@@ -93,11 +96,15 @@ Through the **DataHub MCP Server**, on the coordinator-hosted Streamable HTTP en
 | `get_entities` | entity properties, ownership, tags, and domain for each allocated URN |
 | `get_lineage` | downstream lineage, one hop per allocated entity |
 | `list_schema_fields` | column-level schema for conflict detection and drift fingerprints |
-| `update_description` | the reversible writeback of each coordination outcome |
+| `update_description` | supported reversible coordination-outcome writeback |
 
 DataHub context is not decoration. It decides outcomes: the lineage graph produces the A/B
 conflict, criticality decides which change needs human approval, and the schema/ownership/tag/
 domain fingerprint decides whether a prepared proposal is still safe to commit.
+
+The live application provider and readiness gate verified all 9 allocated entities and 7 lineage
+edges through these DataHub tools. The public judge scenario intentionally uses the same allocated
+graph as an in-process fixture so repeated anonymous runs cannot mutate shared catalog state.
 
 ## Technical execution
 
@@ -118,7 +125,8 @@ domain fingerprint decides whether a prepared proposal is still safe to commit.
 ## Testing it
 
 **Hosted:** open <https://traffic.datahub-hackathon.aaronmathias.com> and press **Run four-agent
-scenario**. Nothing to install, no login, free for the whole judging period.
+scenario**. Nothing to install and no login is required. Anonymous scenario runs have a 30-second
+cooldown; a faster repeat returns `429` with `Retry-After`.
 
 **Locally**, from a clean checkout:
 
@@ -142,18 +150,19 @@ run against real DataHub.
 - Ingestion of the project's graph: 49 typed metadata change proposals accepted.
 - A **reversible writeback, verified and restored** — capture, write, immediate re-read, restore,
   with the entity returned to its original description.
-- **Zero impact on anything outside the project's namespace**, measured rather than asserted.
+- No sibling project gained metadata rows during the verified exercise.
 
-**Verified offline**, by the committed test suite: the conflict matrix including the zero-overlap
+**Verified offline**, by the automated test suite: the conflict matrix including the zero-overlap
 lineage conflict; the full state machine; lease expiry; pre-commit drift detection; real SQL
 artifact mutation and rollback; the MCP client's wire protocol over real HTTP against a strict
 localhost protocol double; readiness; namespace isolation; deterministic DataHub
 seed/reset/capture/restore planning, including the absent-state contract that makes a first-time
-seed of a shared instance recoverable and provably reversible; and the judge console.
+seed of a shared instance recoverable and provably reversible; and the judge console, including
+browser rendering and the recorded demo flow.
 
 **Still not verified:** the absent-state restore path end to end against a live server (the live
 allocation already existed, so the first-time-seed path was never the live path), structured
-properties as a writeback aspect (unused), and the visual rendering of the judge console.
+properties as a writeback aspect (unused).
 
 `docs/LIMITATIONS.md` is the authoritative list, and it distinguishes what was run live from what
 was run against the protocol double. All protocol-double results are labelled **simulated**
