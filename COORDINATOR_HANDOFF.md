@@ -1,6 +1,6 @@
 # Coordinator Handoff: Graph Traffic Control
 
-## 2026-07-29 anonymous mutation hardening — pending deployment
+## 2026-07-29 anonymous mutation hardening — deployed and verified
 
 - `APP_ENV=hackathon` and `APP_ENV=production` now reject direct proposal create, approve,
   commit, and abort requests before opening the transaction store.
@@ -11,6 +11,11 @@
 - Verification: the complete 643-test suite passed with the documented `D:\pt` Windows ACL
   workaround; after extending single-flight parity to local runs, the 60 focused API/UI tests
   passed again. Ruff and whitespace checks passed.
+- Exact commit `8e5307d53ed224fc7f6e056c1f378000cc5127da` passed GitHub Actions and was
+  promoted by the coordinator.
+- Public root, health, and strong readiness returned 200. Anonymous direct abort returned 403,
+  readiness reported `direct_mutations_enabled=false` and a 30-second cooldown, and the isolated
+  judge scenario returned 200 followed by 429 on an immediate repeat.
 
 ## 2026-07-29 public-demo boundary closeout
 
