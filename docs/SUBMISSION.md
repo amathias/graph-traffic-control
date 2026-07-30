@@ -13,7 +13,7 @@ unverified is marked as such and must stay marked.
 | **Project URL (judges test here)** | <https://traffic.datahub-hackathon.aaronmathias.com> |
 | **Public code repository** | <https://github.com/amathias/graph-traffic-control> |
 | **Licence** | Apache 2.0, `LICENSE` at the repository root |
-| **Demo video** | Not yet recorded or published. Recording plan in `docs/DEMO_RUNBOOK.md`; add the public URL to Devpost only after verification. |
+| **Demo video** | <https://youtu.be/cPSkHw8bR9I> (2:13, public, English captions) |
 
 The judge console is the project URL's landing page. It needs no login, no DataHub instance, no
 cloud account, and no paid service — one button runs the entire four-agent scenario.
