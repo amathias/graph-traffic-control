@@ -218,7 +218,7 @@ what "committed" means.
 still proves the write landed; the receipt records the unrestored value loudly rather than
 collapsing both into one boolean. Restoration failure therefore does not retract a commit, but is
 never reported as success. Collapsing them would hide which of the two actually happened, and
-"we left the shared instance dirty" is exactly the thing a reader needs to know.
+"the project left the shared instance dirty" is exactly the thing a reader needs to know.
 
 ## ADR-014: DataHub state changes are planned, guarded whole, and applied only on request
 
@@ -237,13 +237,13 @@ credentials.
 
 Three specific guards:
 
-- **Payloads are guarded, not just addresses.** An aspect attached to one of our datasets can
+- **Payloads are guarded, not just addresses.** An aspect attached to one of this project's datasets can
   name someone else's dataset as an upstream, or another project's domain. Guarding only the
   entity URN would let that through and write a cross-project edge.
 - **Reset takes an explicit scope and accepts only `namespace`.** A global refresh has to be
   asked for and be refused, rather than being an omission that silently widens the blast radius.
   Deletes are soft, and the generated ingestion recipe disables stale-entity removal — with it
-  enabled, ingesting only our allocation would mark everyone else's entities stale.
+  enabled, ingesting only this project's allocation would mark everyone else's entities stale.
 - **Empty plans are refused.** An empty seed, reset, or restore that exits 0 is a claim that work
   happened when none did.
 
@@ -659,7 +659,7 @@ Asserting "some non-empty default" would have passed with `SET` in place. The fa
 not a missing value, it is a **plausible-looking wrong one**, and the entire reversibility
 guarantee rests on the operation having replace-in-place semantics: an append-style operation
 cannot restore a captured original exactly, so a wrong value here silently converts "left as
-found" into "left with our note appended".
+found" into "left with the project's note appended".
 
 ### What this does not change
 

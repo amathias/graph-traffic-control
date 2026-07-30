@@ -173,7 +173,7 @@ before the failure. That number is real: those operations are already in the sha
 Non-negotiable, from `AGENTS.md` and the rules' truthful-claims requirement:
 
 - The console states its context source on screen. **Say what it says.** If it reads `fixture`,
-  do not narrate "reading from our live DataHub instance" over that take.
+  do not narrate "reading from the live DataHub instance" over that take.
 - "Simulated" belongs on anything produced against the protocol double.
 - Do not claim distributed ACID transactions, general multi-agent coordination, or exactly-once
   effects.

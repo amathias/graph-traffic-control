@@ -48,7 +48,7 @@ B reads a column A is about to rename, through a dependency neither of them decl
 combined result is broken, and nothing in a file-level coordinator can see it coming.
 
 Serialising everything would prevent it, and would also stall C, which genuinely is unrelated.
-The problem is not "how do we take a lock" — it is "how does a coordinator know what a change
+The problem is not "how to take a lock" — it is "how does a coordinator know what a change
 actually touches".
 
 ## The solution
