@@ -2,6 +2,25 @@
 
 Maintained per `AGENTS.md`: "Maintain `docs/DECISIONS.md` as architectural decisions are made."
 
+## ADR-023: The hosted API is read-only except for one bounded judge scenario
+
+**Status:** Accepted
+**Date:** 2026-07-29
+
+The public `hackathon` and `production` deployments reject direct proposal creation, approval,
+commit, and abort requests before constructing a transaction runtime. Those endpoints remain
+available in trusted local, test, and coordinator-controlled live environments.
+
+Judges still need the product's complete workflow, so the fixed `/api/demo/run` scenario remains
+public. It is already namespace-bounded and resets only its disposable `judge` state directory.
+The public route now also has a process-local single-flight lock and a 30-second cooldown. This
+prevents overlapping reset/writeback cycles and caps anonymous mutation frequency without making
+the deterministic judge experience depend on authentication.
+
+The limiter is intentionally an application safeguard, not a claim of distributed rate limiting.
+The deployed stock Caddy build was inspected and has no rate-limit handler, so the shared proxy
+adds only supported body and header protections rather than an invalid directive.
+
 ## ADR-001: Fixture-backed context provider until the shared DataHub is reachable
 
 **Status:** Accepted with environment constraint

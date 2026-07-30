@@ -1,5 +1,17 @@
 # Coordinator Handoff: Graph Traffic Control
 
+## 2026-07-29 anonymous mutation hardening — pending deployment
+
+- `APP_ENV=hackathon` and `APP_ENV=production` now reject direct proposal create, approve,
+  commit, and abort requests before opening the transaction store.
+- The fixed, namespace-bounded judge scenario remains public, with a process-local single-flight
+  lock and a 30-second cooldown.
+- Readiness explicitly reports whether direct mutations are enabled and the active demo cooldown.
+- Local, test, and coordinator-controlled live environments retain the full coordination API.
+- Verification: the complete 643-test suite passed with the documented `D:\pt` Windows ACL
+  workaround; after extending single-flight parity to local runs, the 60 focused API/UI tests
+  passed again. Ruff and whitespace checks passed.
+
 ## 2026-07-29 public-demo boundary closeout
 
 | Field | Verified value |

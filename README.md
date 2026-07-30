@@ -1,5 +1,7 @@
 # Graph Traffic Control
 
+[![CI](https://github.com/amathias/graph-traffic-control/actions/workflows/ci.yml/badge.svg)](https://github.com/amathias/graph-traffic-control/actions/workflows/ci.yml)
+
 **Graph Traffic Control: Transactional Coordination for Data Agents**
 
 [Open the live judge console](https://traffic.datahub-hackathon.aaronmathias.com) ·
@@ -16,6 +18,11 @@ preserve an auditable record for the next agent.
 Multiple agents can independently produce valid changes that become invalid when combined. One agent renames a column while another builds a metric on the old name; a third alters an upstream model whose blast radius overlaps both. File locks cannot see these semantic conflicts.
 
 Graph Traffic Control requires every agent to propose its read set, write set, expected graph version, evidence, and intended change. The coordinator queries DataHub for indirect lineage collisions, runs policy and impact checks during a prepare phase, permits unrelated work in parallel, sequences or rejects conflicts, verifies the commit, and writes the outcome back to DataHub.
+
+![Graph Traffic Control console showing a lineage-visible semantic conflict and committed proposal evidence](docs/assets/judge-console.png)
+
+_The judge scenario exposes the dependency file locks cannot see, while an unrelated proposal
+continues independently and every transition remains auditable._
 
 ## Architecture
 

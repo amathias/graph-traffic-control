@@ -43,6 +43,8 @@ class TestReadiness:
         body = response.json()
         assert body["ready"] is True
         assert body["mode"] == "fixture"
+        assert body["direct_mutations_enabled"] is True
+        assert body["demo_cooldown_seconds"] == 0
 
     def test_reports_namespace_allocation(self, seeded_settings):
         body = _client(seeded_settings).get("/api/readiness").json()
@@ -58,7 +60,38 @@ class TestReadiness:
 
     def test_fixture_mode_is_not_ready_in_production(self, seeded_settings):
         deployed = seeded_settings.model_copy(update={"app_env": "production"})
-        assert _client(deployed).get("/api/readiness").status_code == 503
+        response = _client(deployed).get("/api/readiness")
+        assert response.status_code == 503
+        assert response.json()["direct_mutations_enabled"] is False
+        assert response.json()["demo_cooldown_seconds"] == 30
+
+
+class TestPublicMutationBoundary:
+    @pytest.mark.parametrize(
+        ("path", "kwargs"),
+        [
+            ("/api/proposals", {"json": proposal_c().model_dump(mode="json")}),
+            (
+                "/api/proposals/example/approve",
+                {"params": {"token": "prepared-example", "approver": "judge"}},
+            ),
+            (
+                "/api/proposals/example/commit",
+                {"params": {"token": "prepared-example"}},
+            ),
+            (
+                "/api/proposals/example/abort",
+                {"params": {"reason": "example"}},
+            ),
+        ],
+    )
+    def test_direct_mutations_are_disabled_on_public_hosts(
+        self, seeded_settings, path, kwargs
+    ):
+        deployed = seeded_settings.model_copy(update={"app_env": "hackathon"})
+        response = _client(deployed).post(path, **kwargs)
+        assert response.status_code == 403
+        assert "disabled on the public deployment" in response.json()["detail"]
 
 
 class TestGraph:

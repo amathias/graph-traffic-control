@@ -46,6 +46,8 @@ class TestPageIsSelfContained:
         assert "PUBLIC DEMO" in response.text
         assert "traffic.*" in response.text
         assert "without touching production or personal data" in response.text
+        assert "Direct proposal mutations are disabled" in response.text
+        assert "single-flight and rate-limited" in response.text
 
     def test_interactive_api_docs_are_local_only(self):
         assert _interactive_docs_enabled("local") is True
@@ -219,6 +221,18 @@ class TestRepeatability:
             p["state"] for p in second["proposals"]
         ]
         assert first["graph"]["fingerprint"] == second["graph"]["fingerprint"]
+
+    def test_public_demo_is_rate_limited_after_a_completed_run(self, seeded_settings):
+        deployed = seeded_settings.model_copy(update={"app_env": "hackathon"})
+        app.dependency_overrides[get_settings] = lambda: deployed
+        public_client = TestClient(app)
+
+        first = public_client.post("/api/demo/run")
+        second = public_client.post("/api/demo/run")
+
+        assert first.status_code == 200
+        assert second.status_code == 429
+        assert int(second.headers["retry-after"]) > 0
 
     def test_the_scenario_does_not_disturb_the_live_transaction_store(self, client, payload):
         """The judge run is isolated, so it cannot delete proposals submitted through the API."""

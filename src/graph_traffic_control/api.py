@@ -21,8 +21,11 @@ restore cycle in :mod:`graph_traffic_control.writeback`.
 from __future__ import annotations
 
 import json
+import math
 import os
+import time
 from pathlib import Path
+from threading import Lock
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -68,6 +71,12 @@ app = FastAPI(
 )
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+PUBLIC_READ_ONLY_ENVIRONMENTS = {"hackathon", "production"}
+PUBLIC_DEMO_COOLDOWN_SECONDS = 30
+
+_demo_lock = Lock()
+_demo_running = False
+_demo_last_finished = 0.0
 
 #: The judge console ships inside the package. It is a single self-contained document with no
 #: external stylesheet, script, or font, so it renders identically offline and on a locked-down
@@ -86,6 +95,69 @@ def build_provider(settings: Settings, namespace: Namespace) -> ContextProvider:
         client = McpClient(settings.datahub_mcp_url, settings.datahub_token)
         return DataHubContextProvider(client, namespace, allocated_urns(settings))
     return FixtureContextProvider(settings.fixture_root, namespace)
+
+
+def _direct_mutations_enabled(settings: Settings) -> bool:
+    return settings.app_env.casefold() not in PUBLIC_READ_ONLY_ENVIRONMENTS
+
+
+def require_direct_mutations(settings: SettingsDep) -> None:
+    """Keep the hosted API observable while reserving direct mutations for trusted runtimes."""
+    if not _direct_mutations_enabled(settings):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Direct proposal mutations are disabled on the public deployment. "
+                "Use the fixed, isolated judge scenario."
+            ),
+        )
+
+
+def _begin_demo(settings: Settings) -> bool:
+    """Acquire single-flight admission and return whether public controls apply."""
+    global _demo_running
+
+    public_controls = settings.app_env.casefold() in PUBLIC_READ_ONLY_ENVIRONMENTS
+    now = time.monotonic()
+    with _demo_lock:
+        if _demo_running:
+            raise HTTPException(
+                status_code=429,
+                detail="The public demo is already running. Try again shortly.",
+                headers={"Retry-After": "1"},
+            )
+        remaining = (
+            PUBLIC_DEMO_COOLDOWN_SECONDS - (now - _demo_last_finished)
+            if public_controls
+            else 0
+        )
+        if public_controls and remaining > 0:
+            retry_after = max(1, math.ceil(remaining))
+            raise HTTPException(
+                status_code=429,
+                detail="The public demo is cooling down. Try again shortly.",
+                headers={"Retry-After": str(retry_after)},
+            )
+        _demo_running = True
+    return public_controls
+
+
+def _finish_demo(public_controls: bool) -> None:
+    global _demo_last_finished, _demo_running
+
+    with _demo_lock:
+        if public_controls:
+            _demo_last_finished = time.monotonic()
+        _demo_running = False
+
+
+def _reset_demo_limiter_for_tests() -> None:
+    """Restore limiter state between isolated TestClient cases."""
+    global _demo_last_finished, _demo_running
+
+    with _demo_lock:
+        _demo_running = False
+        _demo_last_finished = 0.0
 
 
 class Runtime:
@@ -163,6 +235,12 @@ def readiness(settings: SettingsDep) -> JSONResponse:
             "domain": namespace.domain,
             "tag": namespace.project_tag,
         },
+        "direct_mutations_enabled": _direct_mutations_enabled(settings),
+        "demo_cooldown_seconds": (
+            PUBLIC_DEMO_COOLDOWN_SECONDS
+            if settings.app_env.casefold() in PUBLIC_READ_ONLY_ENVIRONMENTS
+            else 0
+        ),
         "checks": result["checks"],
     }
     return JSONResponse(content=body, status_code=200 if result["ready"] else 503)
@@ -190,7 +268,7 @@ def graph(runtime: RuntimeDep) -> dict[str, Any]:
     }
 
 
-@app.post("/api/proposals")
+@app.post("/api/proposals", dependencies=[Depends(require_direct_mutations)])
 def submit_proposal(proposal: ChangeProposal, runtime: RuntimeDep) -> dict[str, Any]:
     try:
         outcome = runtime.coordinator.prepare(proposal)
@@ -226,7 +304,10 @@ def submit_proposal(proposal: ChangeProposal, runtime: RuntimeDep) -> dict[str, 
     }
 
 
-@app.post("/api/proposals/{proposal_id}/approve")
+@app.post(
+    "/api/proposals/{proposal_id}/approve",
+    dependencies=[Depends(require_direct_mutations)],
+)
 def approve_proposal(proposal_id: str, token: str, approver: str, runtime: RuntimeDep) -> dict:
     stored = runtime.coordinator.token(token)
     if stored is None or stored.proposal_id != proposal_id:
@@ -235,7 +316,10 @@ def approve_proposal(proposal_id: str, token: str, approver: str, runtime: Runti
     return {"proposal_id": proposal_id, "approved_by": approved.approved_by}
 
 
-@app.post("/api/proposals/{proposal_id}/commit")
+@app.post(
+    "/api/proposals/{proposal_id}/commit",
+    dependencies=[Depends(require_direct_mutations)],
+)
 def commit_proposal(proposal_id: str, token: str, runtime: RuntimeDep) -> dict[str, Any]:
     proposal = runtime.store.get_proposal(proposal_id)
     if proposal is None:
@@ -280,7 +364,10 @@ def commit_proposal(proposal_id: str, token: str, runtime: RuntimeDep) -> dict[s
     }
 
 
-@app.post("/api/proposals/{proposal_id}/abort")
+@app.post(
+    "/api/proposals/{proposal_id}/abort",
+    dependencies=[Depends(require_direct_mutations)],
+)
 def abort_proposal(proposal_id: str, reason: str, runtime: RuntimeDep) -> dict[str, Any]:
     proposal = runtime.store.get_proposal(proposal_id)
     if proposal is None:
@@ -354,18 +441,22 @@ def run_demo(settings: SettingsDep) -> dict[str, Any]:
     Deterministic by construction: fixed submission order, explicit barriers, injected clock.
     ``AGENTS.md`` forbids letting the demo depend on uncontrolled concurrent timing.
     """
-    judge_dir = settings.state_dir / JUDGE_STATE_DIRNAME
-    judge_settings = settings.model_copy(update={"app_state_dir": judge_dir})
-
-    reset(judge_settings)
-    seed(judge_settings)
-
-    runner = ScenarioRunner(judge_settings)
+    public_controls = _begin_demo(settings)
     try:
-        runner.run(echo=lambda *_args, **_kwargs: None)
-        return runner.judge_payload()
+        judge_dir = settings.state_dir / JUDGE_STATE_DIRNAME
+        judge_settings = settings.model_copy(update={"app_state_dir": judge_dir})
+
+        reset(judge_settings)
+        seed(judge_settings)
+
+        runner = ScenarioRunner(judge_settings)
+        try:
+            runner.run(echo=lambda *_args, **_kwargs: None)
+            return runner.judge_payload()
+        finally:
+            runner.close()
     finally:
-        runner.close()
+        _finish_demo(public_controls)
 
 
 @app.get("/api/receipts")

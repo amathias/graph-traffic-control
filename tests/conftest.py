@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from graph_traffic_control.api import _reset_demo_limiter_for_tests
 from graph_traffic_control.config import Settings, get_settings
 from graph_traffic_control.context.fixture import FixtureContextProvider
 from graph_traffic_control.context.namespace import Namespace
@@ -82,5 +83,7 @@ def versions(snapshot):
 def _clear_settings_cache():
     """`get_settings` is cached; clear it so env changes in one test cannot leak into another."""
     get_settings.cache_clear()
+    _reset_demo_limiter_for_tests()
     yield
     get_settings.cache_clear()
+    _reset_demo_limiter_for_tests()
