@@ -12,7 +12,7 @@ repository, or completed live verification. Anything still unverified is marked 
 | **Project URL (judges test here)** | <https://traffic.datahub-hackathon.aaronmathias.com> |
 | **Public code repository** | <https://github.com/amathias/graph-traffic-control> |
 | **Licence** | Apache 2.0, `LICENSE` at the repository root |
-| **Demo video** | <https://youtu.be/OHSw2EaI3-I> (2:40, public, English captions) |
+| **Demo video** | <https://youtu.be/xW1IczBUh0g> (2:40, public, English captions) |
 
 The judge console is the project URL's landing page. It needs no login, no DataHub instance, no
 cloud account, and no paid service — one button runs the entire four-agent scenario against a

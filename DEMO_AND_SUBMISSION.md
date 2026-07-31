@@ -105,7 +105,7 @@ Prefer: “Coordinates the demonstrated data-agent changes using deterministic g
 
 ## Recording checklist
 
-- [x] Video is public and under three minutes: <https://youtu.be/OHSw2EaI3-I> (2:40).
+- [x] Video is public and under three minutes: <https://youtu.be/xW1IczBUh0g> (2:40).
 - [ ] All three proposals are legible.
 - [ ] The indirect conflict path is visually obvious.
 - [ ] Agent C visibly proceeds without waiting.

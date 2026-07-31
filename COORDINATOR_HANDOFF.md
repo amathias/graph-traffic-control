@@ -86,7 +86,7 @@ live EC2 host from this project chat.
 | Demo command | `gtc-demo [--export-examples examples]` |
 | Run command | `gtc-api` (uvicorn, `APP_HOST`:`APP_PORT`) |
 | Judge UI | `GET /` — self-contained page; one button runs the whole scenario |
-| Public demo video | <https://youtu.be/OHSw2EaI3-I> (2:40, published English captions) |
+| Public demo video | <https://youtu.be/xW1IczBUh0g> (2:40, published English captions) |
 | Health endpoint | `GET /api/health` — verified 200 on a running server |
 | Readiness endpoint | `GET /api/readiness` — 200 seeded (fixture mode), 503 unseeded, 503 in non-local env without credentials, **503 whenever the graph snapshot will not build** (ADR-019), and **503 when seeded lineage edges cannot be read back** (`lineage_incomplete`, ADR-020). Reports `graph_entities`, `graph_edges`, `graph_fingerprint`, `lineage_edges_verified`. |
 | Persistent volumes | `APP_STATE_DIR` (default `demo/state`) holds `transactions.sqlite`, `artifacts/`, `receipts/`, `datahub/` (plans), `judge/` (judge-run state). Disposable and recreated by `gtc-seed`. **SQLite means a single writer: run one replica.** |

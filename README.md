@@ -6,10 +6,10 @@
 
 [Open the live judge console](https://traffic.datahub-hackathon.aaronmathias.com) ·
 [View the source](https://github.com/amathias/graph-traffic-control) ·
-[Watch the public demo](https://youtu.be/OHSw2EaI3-I) ·
+[Watch the public demo](https://youtu.be/xW1IczBUh0g) ·
 [Follow the under-three-minute recording runbook](docs/DEMO_RUNBOOK.md)
 
-Demo video: **[public on YouTube](https://youtu.be/OHSw2EaI3-I)** (2:40, English captions).
+Demo video: **[public on YouTube](https://youtu.be/xW1IczBUh0g)** (2:40, English captions).
 
 Graph Traffic Control uses DataHub lineage and governance context to detect hidden conflicts between
 autonomous data-agent changes, coordinate safe execution with a semantic two-phase commit, and
@@ -188,7 +188,7 @@ produce is labelled **simulated**.
 [LIMITATIONS.md](./docs/LIMITATIONS.md) is the authoritative line between what was executed live,
 what was executed offline, and what has not been executed at all.
 
-The public 2:40 demo is available at <https://youtu.be/OHSw2EaI3-I> with English captions.
+The public 2:40 demo is available at <https://youtu.be/xW1IczBUh0g> with English captions.
 
 ## Workspace map
 
