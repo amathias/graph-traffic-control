@@ -90,6 +90,9 @@ rather than a green endpoint over an empty graph.
 - Leases are single-process, backed by SQLite. A distributed lease backend is out of MVP scope,
   and SQLite's single-writer model means the service must run as one replica.
 - Lineage expansion is bounded to three hops. Conflicts beyond that bound are not reported.
+- The conflict engine conservatively treats any declared upstream write that reaches a downstream
+  reader as potentially invalidating that reader. It does not attempt to infer that a metric or
+  model update is schema-neutral; the safe resolution is ordering or rebase.
 - Lineage is read one hop downstream per allocated entity. Every edge *inside* the allocation is
   therefore discovered, but an edge that leaves and re-enters the allocation through a foreign
   entity is not followed — by design, since adopting a foreign entity into this graph is exactly
